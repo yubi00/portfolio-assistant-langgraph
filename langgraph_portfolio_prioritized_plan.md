@@ -59,14 +59,19 @@ Notes:
 
 ## Phase 2 - Retrieval Planning
 
-- MUST [ ] `plan_retrieval` node
-- MUST [ ] Define source categories: projects, resume, docs
-- MUST [ ] Routing logic works for multiple prompt types
-- SHOULD [ ] Add richer intent classification
+- MUST [x] `plan_retrieval` node
+- MUST [x] Define source categories: profile, projects, resume, work_history, docs
+- MUST [x] Routing logic works for multiple prompt types
+- SHOULD [x] Add richer intent/source planning through structured OpenAI output
 - SHOULD [ ] Define required user/profile inputs: GitHub owner, resume, work history, preferred display name
-- NICE [ ] Debug logging for source selection
+- NICE [x] Debug output for source selection through CLI/API response fields
 
-Status: next phase.
+Status: complete for planning-only Phase 2.
+
+Notes:
+- Portfolio queries now route through `plan_retrieval` before `generate_answer`.
+- `PromptResponse` exposes `retrieval_sources` and `retrieval_reason`.
+- No actual retrieval is performed yet; Phase 3 will add source-specific retrieval nodes.
 
 ---
 
@@ -170,4 +175,3 @@ Status: mostly complete for non-streaming Phase 1 API.
 - MUST [ ] Follow-ups work with real session memory
 - SHOULD [ ] Streaming works
 - NICE [ ] Observability + reliability layers added
-

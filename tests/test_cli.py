@@ -16,6 +16,8 @@ def test_main_runs_one_shot_prompt(monkeypatch, capsys):
             is_relevant=True,
             intent="projects",
             route="portfolio_query",
+            retrieval_sources=["projects"],
+            retrieval_reason="Project questions need project data.",
             rewritten_query=prompt,
             node_trace=["ingest_user_message", "generate_answer"],
         )
@@ -29,4 +31,6 @@ def test_main_runs_one_shot_prompt(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert exit_code == cli.EXIT_SUCCESS
     assert "answer: What projects?" in output
+    assert "sources: projects" in output
+    assert "source_reason: Project questions need project data." in output
     assert "trace: ingest_user_message -> generate_answer" in output

@@ -22,6 +22,8 @@ class PortfolioState(TypedDict):
     is_relevant: NotRequired[bool]
     intent: NotRequired[str]
     route: NotRequired[str]
+    retrieval_sources: NotRequired[list[str]]
+    retrieval_reason: NotRequired[str]
     final_answer: NotRequired[str]
     error: NotRequired[str]
     node_trace: Annotated[list[str], operator.add]

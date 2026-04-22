@@ -2,11 +2,12 @@ from langchain_openai import ChatOpenAI
 
 from app.config import Settings
 from app.graph.state import ConversationTurnState
-from app.services.assistant import RelevanceDecision
+from app.services.assistant import RelevanceDecision, RetrievalPlan
 from app.services.prompt_templates import (
     build_answer_messages,
     build_context_resolution_messages,
     build_relevance_messages,
+    build_retrieval_planning_messages,
 )
 
 
@@ -49,6 +50,17 @@ class OpenAIAssistantClient:
         structured_model = self._chat.with_structured_output(RelevanceDecision)
         response = await structured_model.ainvoke(
             build_relevance_messages(query=query, assistant_subject=assistant_subject)
+        )
+        return response
+
+    async def plan_retrieval(self, query: str, assistant_subject: str, intent: str | None = None) -> RetrievalPlan:
+        structured_model = self._chat.with_structured_output(RetrievalPlan)
+        response = await structured_model.ainvoke(
+            build_retrieval_planning_messages(
+                query=query,
+                assistant_subject=assistant_subject,
+                intent=intent,
+            )
         )
         return response
 

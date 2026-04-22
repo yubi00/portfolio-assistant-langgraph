@@ -26,6 +26,18 @@ The graph uses explicit route categories rather than a loose yes/no classifier:
 
 This mirrors the production assistant boundary: it may discuss whether the portfolio subject has relevant experience, but it should not become a general coding assistant.
 
+## Phase 2 Retrieval Planning
+
+Portfolio queries now pass through a planning node before answer generation. The node selects the smallest useful source set from:
+
+- `profile`
+- `projects`
+- `resume`
+- `work_history`
+- `docs`
+
+This phase only plans retrieval. Actual GitHub, resume, and document fetching starts in Phase 3.
+
 ## Setup
 
 ```powershell
@@ -56,6 +68,8 @@ One-shot prompt:
 ```powershell
 uv run portfolio-assistant "What projects has this person built?" --show-trace
 ```
+
+With `--show-trace`, portfolio queries also print planned sources and the planner reason.
 
 Interactive prompt loop:
 

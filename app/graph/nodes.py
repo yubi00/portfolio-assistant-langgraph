@@ -55,6 +55,18 @@ class PortfolioGraphNodes:
             "node_trace": [NodeName.ASSISTANT_INTRO],
         }
 
+    async def plan_retrieval(self, state: PortfolioState) -> dict:
+        plan = await self._assistant_service.plan_retrieval(
+            query=state["rewritten_query"],
+            assistant_subject=state.get("assistant_subject", "the portfolio owner"),
+            intent=state.get("intent"),
+        )
+        return {
+            "retrieval_sources": [source.value for source in plan.sources],
+            "retrieval_reason": plan.reason,
+            "node_trace": [NodeName.PLAN_RETRIEVAL],
+        }
+
     async def generate_answer(self, state: PortfolioState) -> dict:
         answer = await self._assistant_service.generate_answer(
             query=state["rewritten_query"],

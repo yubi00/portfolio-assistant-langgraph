@@ -12,6 +12,7 @@ Implemented phases:
 
 - Phase 0: uv project, FastAPI app, CLI, env template, tests
 - Phase 1: minimal LangGraph graph with context resolution, relevance classification, explicit routing, answer generation, assistant intro, and friendly redirect
+- Phase 2: retrieval planning with explicit source categories and debug-visible planned sources
 
 Not implemented yet:
 
@@ -52,7 +53,7 @@ Key boundary: CLI and FastAPI are transports. They do not own assistant behavior
 
 ---
 
-## Phase 1 Graph
+## Current Graph
 
 ```mermaid
 flowchart TD
@@ -60,10 +61,11 @@ flowchart TD
     Ingest --> Resolve[resolve_context]
     Resolve --> Classify[classify_relevance]
 
-    Classify -->|portfolio_query| Answer[generate_answer]
+    Classify -->|portfolio_query| Plan[plan_retrieval]
     Classify -->|assistant_identity| Intro[assistant_intro]
     Classify -->|off_topic| Friendly[friendly_response]
 
+    Plan --> Answer[generate_answer]
     Answer --> END([END])
     Intro --> END
     Friendly --> END
@@ -73,11 +75,29 @@ flowchart TD
 
 | Route | Meaning | Destination |
 |---|---|---|
-| `portfolio_query` | The user asks about the subject's projects, resume, work history, skills, contact details, or professional fit. | `generate_answer` |
+| `portfolio_query` | The user asks about the subject's projects, resume, work history, skills, contact details, or professional fit. | `plan_retrieval` |
 | `assistant_identity` | The user asks who the assistant is or what it can do. | `assistant_intro` |
 | `off_topic` | The user asks for general knowledge, coding/debugging help, or work on their own project. | `friendly_response` |
 
 This route split exists because a boolean `is_relevant` flag was too coarse. For example, "who are you?" is not a portfolio data question, but it also should not receive the same response as "what is the weather?"
+
+### Retrieval Sources
+
+Phase 2 adds source planning but does not fetch data yet.
+
+| Source | Meaning |
+|---|---|
+| `profile` | Identity, contact details, preferred summary, location, and links |
+| `projects` | GitHub or portfolio projects, READMEs, stacks, outcomes, and links |
+| `resume` | Resume facts, education, certifications, skills, achievements, and role summaries |
+| `work_history` | Employment timeline, companies, responsibilities, and domain experience |
+| `docs` | Long-form documents, case studies, blog posts, notes, or custom knowledge |
+
+Decision: keep source planning separate from source execution.
+
+Problem solved: the graph now makes information needs explicit before retrieval exists. Phase 3 can add retrieval nodes without changing classification or answer-generation policy.
+
+Trade-off: Phase 2 adds an extra LLM call for relevant queries before it improves answer quality. This is acceptable for learning and inspection; later we can optimize or combine calls if latency becomes a problem.
 
 ---
 
@@ -95,6 +115,8 @@ Current keys:
 - `is_relevant`: compatibility boolean for answer-generation relevance
 - `intent`: short classifier label, such as `projects`, `professional_fit`, `assistant_identity`, or `user_task`
 - `route`: graph route category
+- `retrieval_sources`: planned source categories for portfolio queries
+- `retrieval_reason`: short explanation of why those sources were selected
 - `final_answer`: final response text
 - `error`: reserved for later reliability handling
 - `node_trace`: append-only execution trace used for CLI/API debugging
@@ -221,7 +243,19 @@ Trade-off: early answers are limited. This is acceptable because Phase 2/3 will 
 
 ---
 
-### 8. Use Tests for Graph Route Behavior
+### 8. Add Retrieval Planning Before Retrieval Execution
+
+Problem: directly retrieving inside answer generation mixes planning, data access, and synthesis. That makes behavior hard to inspect and harder to evolve into multi-source retrieval.
+
+Decision: add a `plan_retrieval` node that chooses source categories for portfolio queries. The selected sources are stored in graph state and exposed in responses.
+
+Problem solved: information needs become explicit and testable before source-specific retrieval nodes exist.
+
+Trade-off: relevant queries now make an additional LLM call. This may be optimized later with caching, heuristic fallbacks, or combined classification/planning if needed.
+
+---
+
+### 9. Use Tests for Graph Route Behavior
 
 Problem: LLM behavior can drift, but graph topology and route handling should remain deterministic.
 
@@ -268,7 +302,7 @@ uv run portfolio-assistant "can Yubi help with TypeScript backend systems?" --su
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> classify_relevance -> generate_answer
+ingest_user_message -> resolve_context -> classify_relevance -> plan_retrieval -> generate_answer
 ```
 
 ---
@@ -277,7 +311,6 @@ ingest_user_message -> resolve_context -> classify_relevance -> generate_answer
 
 This document should be updated whenever a phase changes system behavior. Expected next updates:
 
-- Phase 2: retrieval planning and source category routing
 - Phase 3: GitHub, resume, and document retrieval nodes
 - Phase 4: context merge, scoring, dedupe, and context budget policy
 - Phase 6: memory and checkpointing strategy

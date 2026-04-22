@@ -88,9 +88,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _print_response(response: PromptResponse, show_trace: bool) -> None:
     print(response.answer)
     if show_trace:
+        if response.retrieval_sources:
+            print(f"\nsources: {', '.join(response.retrieval_sources)}")
+        if response.retrieval_reason:
+            print(f"source_reason: {response.retrieval_reason}")
         print(f"\ntrace: {' -> '.join(response.node_trace)}")
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

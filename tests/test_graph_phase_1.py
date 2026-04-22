@@ -1,6 +1,6 @@
 from app.graph.builder import build_portfolio_graph
-from app.graph.constants import RouteName
-from app.services.assistant import RelevanceDecision
+from app.graph.constants import RetrievalSource, RouteName
+from app.services.assistant import RelevanceDecision, RetrievalPlan
 
 
 class FakeAssistantService:
@@ -22,6 +22,18 @@ class FakeAssistantService:
 
     async def generate_answer(self, query, assistant_subject, portfolio_context):
         return f"Grounded answer for {assistant_subject}: {query}"
+
+    async def plan_retrieval(self, query, assistant_subject, intent=None):
+        normalized_query = query.lower()
+        if "skill" in normalized_query:
+            return RetrievalPlan(
+                sources=[RetrievalSource.RESUME, RetrievalSource.PROJECTS],
+                reason="Skills questions need resume facts and project evidence.",
+            )
+        return RetrievalPlan(
+            sources=[RetrievalSource.PROJECTS],
+            reason="Project questions need project data.",
+        )
 
     def build_assistant_intro(self, assistant_subject):
         return f"I'm {assistant_subject}'s portfolio assistant."
@@ -47,12 +59,15 @@ async def test_relevant_query_routes_to_generate_answer():
     assert result["is_relevant"] is True
     assert result["intent"] == "projects"
     assert result["route"] == "portfolio_query"
+    assert result["retrieval_sources"] == ["projects"]
+    assert result["retrieval_reason"] == "Project questions need project data."
     assert result["rewritten_query"] == "Tell me about the first project"
     assert result["final_answer"] == "Grounded answer for Alex: Tell me about the first project"
     assert result["node_trace"] == [
         "ingest_user_message",
         "resolve_context",
         "classify_relevance",
+        "plan_retrieval",
         "generate_answer",
     ]
 
@@ -72,6 +87,7 @@ async def test_irrelevant_query_routes_to_friendly_response():
     assert result["is_relevant"] is False
     assert result["intent"] == "off_topic"
     assert result["route"] == "off_topic"
+    assert result.get("retrieval_sources") is None
     assert result["final_answer"] == "I can help with questions about Alex's portfolio."
     assert result["node_trace"] == [
         "ingest_user_message",
@@ -96,6 +112,7 @@ async def test_assistant_identity_routes_to_intro_response():
     assert result["is_relevant"] is False
     assert result["intent"] == "assistant_identity"
     assert result["route"] == "assistant_identity"
+    assert result.get("retrieval_sources") is None
     assert result["final_answer"] == "I'm Alex's portfolio assistant."
     assert result["node_trace"] == [
         "ingest_user_message",
@@ -120,10 +137,35 @@ async def test_user_project_help_routes_to_friendly_response():
     assert result["is_relevant"] is False
     assert result["intent"] == "user_task"
     assert result["route"] == "off_topic"
+    assert result.get("retrieval_sources") is None
     assert result["final_answer"] == "I can't work on your project. Ask me about Alex's portfolio."
     assert result["node_trace"] == [
         "ingest_user_message",
         "resolve_context",
         "classify_relevance",
         "friendly_response",
+    ]
+
+
+async def test_skill_query_can_plan_multiple_sources():
+    graph = build_portfolio_graph(FakeAssistantService())
+
+    result = await graph.ainvoke(
+        {
+            "user_query": "What AI skills does Alex have?",
+            "messages": [],
+            "assistant_subject": "Alex",
+            "portfolio_context": "Alex has AI project experience.",
+        }
+    )
+
+    assert result["route"] == "portfolio_query"
+    assert result["retrieval_sources"] == ["resume", "projects"]
+    assert result["retrieval_reason"] == "Skills questions need resume facts and project evidence."
+    assert result["node_trace"] == [
+        "ingest_user_message",
+        "resolve_context",
+        "classify_relevance",
+        "plan_retrieval",
+        "generate_answer",
     ]

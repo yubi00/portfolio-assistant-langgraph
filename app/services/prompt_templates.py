@@ -40,3 +40,13 @@ def build_answer_messages(query: str, assistant_subject: str, portfolio_context:
         ),
     ]
 
+
+def build_retrieval_planning_messages(query: str, assistant_subject: str, intent: str | None) -> list[tuple[str, str]]:
+    intent_text = intent or "unknown"
+    return [
+        ("system", load_system_prompt("retrieval_planning.md")),
+        (
+            "human",
+            f"Portfolio subject: {assistant_subject}\nIntent: {intent_text}\n\nUser query: {query}",
+        ),
+    ]

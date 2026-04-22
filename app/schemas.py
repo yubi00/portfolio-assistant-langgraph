@@ -18,5 +18,7 @@ class PromptResponse(BaseModel):
     is_relevant: bool
     intent: str | None = None
     route: str | None = None
+    retrieval_sources: list[str] = Field(default_factory=list)
+    retrieval_reason: str | None = None
     rewritten_query: str
     node_trace: list[str]
