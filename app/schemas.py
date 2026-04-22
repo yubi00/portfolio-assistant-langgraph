@@ -1,0 +1,22 @@
+from pydantic import BaseModel, Field
+
+
+class ConversationTurn(BaseModel):
+    user: str
+    assistant: str
+
+
+class PromptRequest(BaseModel):
+    prompt: str = Field(min_length=1)
+    history: list[ConversationTurn] = Field(default_factory=list)
+    assistant_subject: str | None = None
+    portfolio_context: str | None = None
+
+
+class PromptResponse(BaseModel):
+    answer: str
+    is_relevant: bool
+    intent: str | None = None
+    route: str | None = None
+    rewritten_query: str
+    node_trace: list[str]
