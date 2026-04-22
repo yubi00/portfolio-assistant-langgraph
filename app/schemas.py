@@ -20,5 +20,6 @@ class PromptResponse(BaseModel):
     route: str | None = None
     retrieval_sources: list[str] = Field(default_factory=list)
     retrieval_reason: str | None = None
+    retrieval_errors: list[str] = Field(default_factory=list)
     rewritten_query: str
     node_trace: list[str]

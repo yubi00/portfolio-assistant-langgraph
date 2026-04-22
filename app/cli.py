@@ -92,6 +92,8 @@ def _print_response(response: PromptResponse, show_trace: bool) -> None:
             print(f"\nsources: {', '.join(response.retrieval_sources)}")
         if response.retrieval_reason:
             print(f"source_reason: {response.retrieval_reason}")
+        if response.retrieval_errors:
+            print(f"retrieval_errors: {' | '.join(response.retrieval_errors)}")
         print(f"\ntrace: {' -> '.join(response.node_trace)}")
 
 

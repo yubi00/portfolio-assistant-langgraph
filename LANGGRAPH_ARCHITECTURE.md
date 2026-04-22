@@ -13,12 +13,12 @@ Implemented phases:
 - Phase 0: uv project, FastAPI app, CLI, env template, tests
 - Phase 1: minimal LangGraph graph with context resolution, relevance classification, explicit routing, answer generation, assistant intro, and friendly redirect
 - Phase 2: retrieval planning with explicit source categories and debug-visible planned sources
+- Phase 3A: retrieval nodes, GitHub project retrieval, local resume/docs/work-history retrieval, and context merging
 
 Not implemented yet:
 
-- GitHub retrieval
-- resume/work-history retrieval
-- multi-source context merge
+- PDF/DOCX resume ingestion
+- vector/RAG-backed resume retrieval
 - session memory/checkpointing
 - streaming
 - observability and reliability layers
@@ -65,7 +65,13 @@ flowchart TD
     Classify -->|assistant_identity| Intro[assistant_intro]
     Classify -->|off_topic| Friendly[friendly_response]
 
-    Plan --> Answer[generate_answer]
+    Plan --> Profile[retrieve_profile]
+    Profile --> Projects[retrieve_projects]
+    Projects --> Resume[retrieve_resume]
+    Resume --> Work[retrieve_work_history]
+    Work --> Docs[retrieve_docs]
+    Docs --> Merge[merge_normalize_context]
+    Merge --> Answer[generate_answer]
     Answer --> END([END])
     Intro --> END
     Friendly --> END
@@ -83,7 +89,7 @@ This route split exists because a boolean `is_relevant` flag was too coarse. For
 
 ### Retrieval Sources
 
-Phase 2 adds source planning but does not fetch data yet.
+Phase 2 added source planning. Phase 3A adds source retrieval and context merging.
 
 | Source | Meaning |
 |---|---|
@@ -98,6 +104,40 @@ Decision: keep source planning separate from source execution.
 Problem solved: the graph now makes information needs explicit before retrieval exists. Phase 3 can add retrieval nodes without changing classification or answer-generation policy.
 
 Trade-off: Phase 2 adds an extra LLM call for relevant queries before it improves answer quality. This is acceptable for learning and inspection; later we can optimize or combine calls if latency becomes a problem.
+
+### Retrieval Execution
+
+The first retrieval implementation uses:
+
+- GitHub REST API for `projects`; forks are excluded by default for "built projects" accuracy
+- local text/markdown files for `resume`, `work_history`, and `docs`
+- configured fallback/profile context for `profile`
+
+The graph currently runs retrieval nodes sequentially. Each node checks whether its source was planned and no-ops if not.
+
+Decision: use sequential no-op retrieval nodes instead of dynamic fan-out for the first implementation.
+
+Problem solved: every retrieval step is visible in LangGraph traces and easy to test without introducing fan-out complexity too early.
+
+Trade-off: traces include no-op retrieval nodes. This is acceptable while learning; later we can replace the chain with conditional fan-out or parallel sends if the graph becomes noisy.
+
+Project retrieval strategy:
+
+- Current: fetch recent GitHub repositories for `GITHUB_OWNER`, excluding forks unless `GITHUB_INCLUDE_FORKS=true`.
+- Later: enrich project detail with README content, pinned/featured project configuration, scoring, and cache policy.
+
+Problem solved: "what projects has this person built?" should not treat forked repositories as owned work.
+
+Trade-off: excluding forks may hide meaningful fork-based contributions. A future contribution-focused query can use a separate retrieval mode or include forks conditionally.
+
+Resume strategy:
+
+- Current: load small resume/work-history text or Markdown files directly into context.
+- Later: accept PDF/DOCX, normalize into Markdown/JSON during ingestion, then optionally chunk/index for RAG.
+
+Problem solved: a 1-2 page resume usually fits comfortably in context, so RAG is not required for the first useful version.
+
+Trade-off: direct context loading is simpler but less scalable for larger document collections. RAG remains a later upgrade, not a Phase 3 blocker.
 
 ---
 
@@ -117,6 +157,9 @@ Current keys:
 - `route`: graph route category
 - `retrieval_sources`: planned source categories for portfolio queries
 - `retrieval_reason`: short explanation of why those sources were selected
+- `profile_context`, `project_context`, `resume_context`, `work_history_context`, `docs_context`: raw retrieved source context
+- `merged_context`: normalized context passed to answer generation
+- `retrieval_errors`: non-fatal retrieval errors collected from source nodes
 - `final_answer`: final response text
 - `error`: reserved for later reliability handling
 - `node_trace`: append-only execution trace used for CLI/API debugging
@@ -255,7 +298,19 @@ Trade-off: relevant queries now make an additional LLM call. This may be optimiz
 
 ---
 
-### 9. Use Tests for Graph Route Behavior
+### 9. Keep Retrieval Failures Non-Fatal
+
+Problem: one missing source, such as a missing resume file, should not fail the entire assistant response if other context is available.
+
+Decision: retrieval nodes return content or an error string. Errors are stored in `retrieval_errors`; context merging continues with successful sources.
+
+Problem solved: partial data can still produce a grounded answer.
+
+Trade-off: answer quality depends on what was retrieved. The CLI/API debug fields expose skipped or failed sources so failures are inspectable.
+
+---
+
+### 10. Use Tests for Graph Route Behavior
 
 Problem: LLM behavior can drift, but graph topology and route handling should remain deterministic.
 
@@ -302,7 +357,7 @@ uv run portfolio-assistant "can Yubi help with TypeScript backend systems?" --su
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> classify_relevance -> plan_retrieval -> generate_answer
+ingest_user_message -> resolve_context -> classify_relevance -> plan_retrieval -> retrieve_profile -> retrieve_projects -> retrieve_resume -> retrieve_work_history -> retrieve_docs -> merge_normalize_context -> generate_answer
 ```
 
 ---
@@ -311,7 +366,6 @@ ingest_user_message -> resolve_context -> classify_relevance -> plan_retrieval -
 
 This document should be updated whenever a phase changes system behavior. Expected next updates:
 
-- Phase 3: GitHub, resume, and document retrieval nodes
 - Phase 4: context merge, scoring, dedupe, and context budget policy
 - Phase 6: memory and checkpointing strategy
 - Phase 8: streaming transport and event contract

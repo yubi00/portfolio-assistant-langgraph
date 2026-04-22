@@ -18,6 +18,7 @@ def test_main_runs_one_shot_prompt(monkeypatch, capsys):
             route="portfolio_query",
             retrieval_sources=["projects"],
             retrieval_reason="Project questions need project data.",
+            retrieval_errors=[],
             rewritten_query=prompt,
             node_trace=["ingest_user_message", "generate_answer"],
         )

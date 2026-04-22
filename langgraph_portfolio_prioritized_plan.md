@@ -77,23 +77,35 @@ Notes:
 
 ## Phase 3 - Retrieval Nodes
 
-- MUST [ ] `retrieve_projects` node
-- MUST [ ] `retrieve_resume` node
-- MUST [ ] `retrieve_docs` node
-- MUST [ ] Support multi-source queries
-- SHOULD [ ] Service layer separation
-- SHOULD [ ] GitHub retrieval uses configured token/owner
+- MUST [x] `retrieve_projects` node
+- MUST [x] `retrieve_resume` node
+- MUST [x] `retrieve_docs` node
+- MUST [x] Support multi-source queries
+- SHOULD [x] Service layer separation
+- SHOULD [x] GitHub retrieval uses configured token/owner
+- SHOULD [x] `retrieve_work_history` node
+- SHOULD [x] `retrieve_profile` node
 - NICE [ ] Optional web retrieval
+
+Status: complete for first retrieval-node implementation.
+
+Notes:
+- `projects` uses GitHub REST API.
+- `resume`, `work_history`, and `docs` use configured local text/markdown files for now.
+- PDF/DOCX ingestion and RAG are intentionally deferred.
 
 ---
 
 ## Phase 4 - Context Merge
 
-- MUST [ ] `merge_normalize_context` node
-- MUST [ ] Combine multi-source results
-- MUST [ ] Prevent context overload
+- MUST [x] `merge_normalize_context` node
+- MUST [x] Combine multi-source results
+- MUST [x] Prevent context overload with `MERGED_CONTEXT_MAX_CHARS`
 - SHOULD [ ] Deduplication
 - NICE [ ] Advanced ranking/scoring
+- NICE [ ] Replace sequential no-op retrieval chain with conditional fan-out or parallel retrieval sends if traces/no-op nodes become noisy
+
+Status: basic merge complete. Ranking/deduplication remain future work.
 
 ---
 
@@ -102,7 +114,7 @@ Notes:
 - MUST [x] `generate_answer` node exists
 - MUST [x] No-hallucination rule for Phase 1 inline context
 - MUST [x] Handle missing data by saying context is insufficient
-- MUST [ ] Ground answers in retrieved multi-source context
+- MUST [x] Ground answers in retrieved multi-source context
 - SHOULD [ ] Structured output formatting
 - NICE [ ] Tone/UX improvements
 

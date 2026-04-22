@@ -26,6 +26,7 @@ async def run_prompt(request: PromptRequest, settings: Settings) -> PromptRespon
         route=result.get("route"),
         retrieval_sources=result.get("retrieval_sources", []),
         retrieval_reason=result.get("retrieval_reason"),
+        retrieval_errors=result.get("retrieval_errors", []),
         rewritten_query=result.get("rewritten_query", request.prompt),
         node_trace=result.get("node_trace", []),
     )

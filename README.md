@@ -36,7 +36,13 @@ Portfolio queries now pass through a planning node before answer generation. The
 - `work_history`
 - `docs`
 
-This phase only plans retrieval. Actual GitHub, resume, and document fetching starts in Phase 3.
+Phase 3 adds first-pass retrieval:
+
+- `projects` from GitHub using `GITHUB_OWNER` and optional `GITHUB_TOKEN`; forks are excluded by default
+- `resume`, `work_history`, and `docs` from local text/markdown files
+- merged context passed into answer generation
+
+PDF/DOCX resume ingestion and vector/RAG retrieval are deferred until later.
 
 ## Setup
 
