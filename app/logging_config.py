@@ -45,7 +45,7 @@ class ColorFormatter(logging.Formatter):
 def configure_logging(level: str, use_color: bool = True, force: bool = False) -> None:
     normalized_level = level.upper()
     log_level = getattr(logging, normalized_level, logging.INFO)
-    handler = logging.StreamHandler()
+    handler = logging.StreamHandler(sys.__stderr__)
     handler.setFormatter(ColorFormatter(use_color=use_color and sys.stderr.isatty()))
 
     root_logger = logging.getLogger()

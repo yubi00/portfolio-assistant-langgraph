@@ -1,7 +1,9 @@
 import logging
 from typing import Literal
 
-from app.graph.constants import RouteName
+from langgraph.types import Send
+
+from app.graph.constants import NodeName, RetrievalSource, RouteName
 from app.graph.state import PortfolioState
 
 
@@ -28,3 +30,28 @@ def _log_route(route: RouteName, state: PortfolioState) -> None:
         state.get("intent"),
         state.get("is_relevant"),
     )
+
+
+def route_to_retrievers(state: PortfolioState) -> list[Send]:
+    source_to_node = {
+        RetrievalSource.PROFILE.value: NodeName.RETRIEVE_PROFILE,
+        RetrievalSource.PROJECTS.value: NodeName.RETRIEVE_PROJECTS,
+        RetrievalSource.RESUME.value: NodeName.RETRIEVE_RESUME,
+        RetrievalSource.WORK_HISTORY.value: NodeName.RETRIEVE_WORK_HISTORY,
+        RetrievalSource.DOCS.value: NodeName.RETRIEVE_DOCS,
+    }
+    sends = [
+        Send(source_to_node[source], state)
+        for source in state.get("retrieval_sources", [])
+        if source in source_to_node
+    ]
+    if not sends:
+        logger.warning("%-22s | no retrieval sources selected; continuing to merge", "edge retrieval")
+        return [Send(NodeName.MERGE_NORMALIZE_CONTEXT, state)]
+
+    logger.info(
+        "=> %-22s | fanout=%s",
+        "edge retrieval",
+        ",".join(state.get("retrieval_sources", [])),
+    )
+    return sends

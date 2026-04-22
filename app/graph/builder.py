@@ -5,7 +5,7 @@ from langgraph.graph import END, START, StateGraph
 from app.config import get_settings
 from app.graph.constants import NodeName, RouteName
 from app.graph.nodes import PortfolioGraphNodes
-from app.graph.routing import route_after_relevance
+from app.graph.routing import route_after_relevance, route_to_retrievers
 from app.graph.state import PortfolioState
 from app.services.assistant import AssistantService
 from app.services.openai_client import OpenAIAssistantClient
@@ -51,11 +51,11 @@ def build_portfolio_graph(
             RouteName.OFF_TOPIC: NodeName.FRIENDLY_RESPONSE,
         },
     )
-    builder.add_edge(NodeName.PLAN_RETRIEVAL, NodeName.RETRIEVE_PROFILE)
-    builder.add_edge(NodeName.RETRIEVE_PROFILE, NodeName.RETRIEVE_PROJECTS)
-    builder.add_edge(NodeName.RETRIEVE_PROJECTS, NodeName.RETRIEVE_RESUME)
-    builder.add_edge(NodeName.RETRIEVE_RESUME, NodeName.RETRIEVE_WORK_HISTORY)
-    builder.add_edge(NodeName.RETRIEVE_WORK_HISTORY, NodeName.RETRIEVE_DOCS)
+    builder.add_conditional_edges(NodeName.PLAN_RETRIEVAL, route_to_retrievers)
+    builder.add_edge(NodeName.RETRIEVE_PROFILE, NodeName.MERGE_NORMALIZE_CONTEXT)
+    builder.add_edge(NodeName.RETRIEVE_PROJECTS, NodeName.MERGE_NORMALIZE_CONTEXT)
+    builder.add_edge(NodeName.RETRIEVE_RESUME, NodeName.MERGE_NORMALIZE_CONTEXT)
+    builder.add_edge(NodeName.RETRIEVE_WORK_HISTORY, NodeName.MERGE_NORMALIZE_CONTEXT)
     builder.add_edge(NodeName.RETRIEVE_DOCS, NodeName.MERGE_NORMALIZE_CONTEXT)
     builder.add_edge(NodeName.MERGE_NORMALIZE_CONTEXT, NodeName.GENERATE_ANSWER)
     builder.add_edge(NodeName.ASSISTANT_INTRO, END)

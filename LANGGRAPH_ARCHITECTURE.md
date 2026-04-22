@@ -65,12 +65,16 @@ flowchart TD
     Classify -->|assistant_identity| Intro[assistant_intro]
     Classify -->|off_topic| Friendly[friendly_response]
 
-    Plan --> Profile[retrieve_profile]
-    Profile --> Projects[retrieve_projects]
-    Projects --> Resume[retrieve_resume]
-    Resume --> Work[retrieve_work_history]
-    Work --> Docs[retrieve_docs]
-    Docs --> Merge[merge_normalize_context]
+    Plan -. selected .-> Profile[retrieve_profile]
+    Plan -. selected .-> Projects[retrieve_projects]
+    Plan -. selected .-> Resume[retrieve_resume]
+    Plan -. selected .-> Work[retrieve_work_history]
+    Plan -. selected .-> Docs[retrieve_docs]
+    Profile --> Merge[merge_normalize_context]
+    Projects --> Merge
+    Resume --> Merge
+    Work --> Merge
+    Docs --> Merge
     Merge --> Answer[generate_answer]
     Answer --> END([END])
     Intro --> END
@@ -111,15 +115,15 @@ The first retrieval implementation uses:
 
 - GitHub REST API for `projects`; forks are excluded by default for "built projects" accuracy
 - local text/markdown files for `resume`, `work_history`, and `docs`
-- configured fallback/profile context for `profile`
+- resume-derived profile context for `profile`
 
-The graph currently runs retrieval nodes sequentially. Each node checks whether its source was planned and no-ops if not.
+The graph dispatches only planned retrieval sources with LangGraph dynamic sends. Independent retrieval nodes can run concurrently, then join at `merge_normalize_context`.
 
-Decision: use sequential no-op retrieval nodes instead of dynamic fan-out for the first implementation.
+Decision: use conditional fan-out for retrieval execution.
 
-Problem solved: every retrieval step is visible in LangGraph traces and easy to test without introducing fan-out complexity too early.
+Problem solved: multi-source retrieval avoids unnecessary sequential latency and traces only show selected retrieval nodes.
 
-Trade-off: traces include no-op retrieval nodes. This is acceptable for initial observability; later we can replace the chain with conditional fan-out or parallel sends if the graph becomes noisy.
+Trade-off: fan-out introduces more graph-routing complexity and retrieval node ordering in traces should not be treated as semantically meaningful.
 
 Project retrieval strategy:
 
@@ -366,13 +370,13 @@ ingest_user_message -> resolve_context -> classify_relevance -> friendly_respons
 Portfolio-fit answer:
 
 ```powershell
-uv run portfolio-assistant "can Yubi help with TypeScript backend systems?" --subject "Yubi" --context "..."
+uv run portfolio-assistant "can Yubi help with TypeScript backend systems?" --subject "Yubi" --resume-path "data/processed/resume.md"
 ```
 
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> classify_relevance -> plan_retrieval -> retrieve_profile -> retrieve_projects -> retrieve_resume -> retrieve_work_history -> retrieve_docs -> merge_normalize_context -> generate_answer
+ingest_user_message -> resolve_context -> classify_relevance -> plan_retrieval -> retrieve_projects -> retrieve_resume -> merge_normalize_context -> generate_answer
 ```
 
 ---

@@ -102,11 +102,11 @@ Notes:
 - MUST [x] `merge_normalize_context` node
 - MUST [x] Combine multi-source results
 - MUST [x] Prevent context overload with `MERGED_CONTEXT_MAX_CHARS`
+- SHOULD [x] Replace sequential no-op retrieval chain with conditional fan-out / dynamic sends
 - SHOULD [ ] Deduplication
 - NICE [ ] Advanced ranking/scoring
-- NICE [ ] Replace sequential no-op retrieval chain with conditional fan-out or parallel retrieval sends if traces/no-op nodes become noisy
 
-Status: basic merge complete. Ranking/deduplication remain future work.
+Status: basic merge and conditional fan-out complete. Ranking/deduplication remain future work.
 
 ---
 

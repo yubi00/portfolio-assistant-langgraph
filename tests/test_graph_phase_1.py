@@ -87,11 +87,7 @@ async def test_relevant_query_routes_to_generate_answer():
         "resolve_context",
         "classify_relevance",
         "plan_retrieval",
-        "retrieve_profile",
         "retrieve_projects",
-        "retrieve_resume",
-        "retrieve_work_history",
-        "retrieve_docs",
         "merge_normalize_context",
         "generate_answer",
     ]
@@ -185,16 +181,15 @@ async def test_skill_query_can_plan_multiple_sources():
     assert result["retrieval_reason"] == "Skills questions need resume facts and project evidence."
     assert result["project_context"] == "Project data"
     assert result["resume_context"] == "Resume data"
-    assert result["node_trace"] == [
+    assert result["node_trace"][:4] == [
         "ingest_user_message",
         "resolve_context",
         "classify_relevance",
         "plan_retrieval",
-        "retrieve_profile",
-        "retrieve_projects",
-        "retrieve_resume",
-        "retrieve_work_history",
-        "retrieve_docs",
-        "merge_normalize_context",
-        "generate_answer",
     ]
+    assert "retrieve_projects" in result["node_trace"]
+    assert "retrieve_resume" in result["node_trace"]
+    assert "retrieve_profile" not in result["node_trace"]
+    assert "retrieve_work_history" not in result["node_trace"]
+    assert "retrieve_docs" not in result["node_trace"]
+    assert result["node_trace"][-2:] == ["merge_normalize_context", "generate_answer"]

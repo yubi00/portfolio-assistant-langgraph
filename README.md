@@ -39,6 +39,7 @@ Phase 3 adds first-pass retrieval:
 - `projects` from GitHub using `GITHUB_OWNER` and optional `GITHUB_TOKEN`; forks are excluded by default
 - `resume`, `work_history`, and `docs` from local text/markdown files
 - merged context passed into answer generation
+- planned retrieval sources fan out to selected retrievers and then merge before answer generation
 
 PDF/DOCX resume ingestion and vector/RAG retrieval are deferred until later.
 
