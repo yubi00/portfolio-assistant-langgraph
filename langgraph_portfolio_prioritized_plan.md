@@ -25,7 +25,6 @@ Status: complete.
 Notes:
 - FastAPI app is available through `app.main:app`.
 - CLI is available through `uv run portfolio-assistant`.
-- Old-system reference architecture is preserved in `ARCHITECTURE_OLD_SYSTEM.md`.
 - LangGraph implementation architecture is tracked in `LANGGRAPH_ARCHITECTURE.md`.
 
 ---

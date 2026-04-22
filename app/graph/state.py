@@ -11,7 +11,7 @@ class PortfolioState(TypedDict):
     """Shared graph state.
 
     LangGraph nodes return partial updates to this structure. Keeping the state
-    explicit makes orchestration behavior easier to inspect while learning.
+    explicit makes orchestration behavior easier to inspect and test.
     """
 
     user_query: str

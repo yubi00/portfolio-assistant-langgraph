@@ -245,7 +245,7 @@ Do NOT replace current system.
 
 Build this as:
 - parallel system
-- learning environment
+- standalone implementation
 
 Later decide:
 - whether to merge

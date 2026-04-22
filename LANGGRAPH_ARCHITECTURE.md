@@ -1,8 +1,8 @@
 # LangGraph Portfolio Assistant Architecture
 
-This document tracks the architecture of the learning implementation in this repository. It is intentionally separate from `ARCHITECTURE_OLD_SYSTEM.md`, which describes the existing production portfolio assistant.
+This document tracks the architecture of this LangGraph portfolio assistant.
 
-The goal is to rebuild the portfolio assistant behavior with LangGraph while keeping production-grade boundaries: clear orchestration, explicit state, transport separation, configurable portfolio subject, grounded answers, and testable route decisions.
+The goal is to provide production-grade boundaries: clear orchestration, explicit state, transport separation, configurable portfolio subject, grounded answers, and testable route decisions.
 
 ---
 
@@ -103,7 +103,7 @@ Decision: keep source planning separate from source execution.
 
 Problem solved: the graph now makes information needs explicit before retrieval exists. Phase 3 can add retrieval nodes without changing classification or answer-generation policy.
 
-Trade-off: Phase 2 adds an extra LLM call for relevant queries before it improves answer quality. This is acceptable for learning and inspection; later we can optimize or combine calls if latency becomes a problem.
+Trade-off: Phase 2 adds an extra LLM call for relevant queries before retrieval execution. This is acceptable for inspection and correctness; later we can optimize or combine calls if latency becomes a problem.
 
 ### Retrieval Execution
 
@@ -119,7 +119,7 @@ Decision: use sequential no-op retrieval nodes instead of dynamic fan-out for th
 
 Problem solved: every retrieval step is visible in LangGraph traces and easy to test without introducing fan-out complexity too early.
 
-Trade-off: traces include no-op retrieval nodes. This is acceptable while learning; later we can replace the chain with conditional fan-out or parallel sends if the graph becomes noisy.
+Trade-off: traces include no-op retrieval nodes. This is acceptable for initial observability; later we can replace the chain with conditional fan-out or parallel sends if the graph becomes noisy.
 
 Project retrieval strategy:
 
@@ -213,17 +213,17 @@ Trade-off: more files than a small script. This is intentional because the proje
 
 ### 1. Use Python, FastAPI, and LangGraph
 
-Problem: the goal is to learn LangGraph while staying close to the existing Python production assistant.
+Problem: the assistant needs explicit orchestration, HTTP transport, CLI testing, and Python-native AI ecosystem support.
 
 Decision: build with Python, FastAPI, LangGraph, and `langchain-openai`.
 
-Trade-off: this is not framework-minimal. The extra structure is justified because the project is explicitly about learning the LangChain/LangGraph ecosystem.
+Trade-off: this is not framework-minimal. The extra structure is justified because graph orchestration, retrieval, transport, and observability need clear boundaries.
 
 ---
 
 ### 2. Add a CLI Transport Early
 
-Problem: testing every change through a running API slows learning and creates unnecessary transport noise.
+Problem: testing every change through a running API slows local development and creates unnecessary transport noise.
 
 Decision: add `portfolio-assistant` CLI that invokes the same `run_prompt()` service as FastAPI.
 

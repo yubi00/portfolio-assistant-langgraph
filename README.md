@@ -1,18 +1,16 @@
 # LangGraph Portfolio Assistant
 
-Learning-focused LangGraph implementation of a generic portfolio assistant.
-
-The production assistant architecture is documented in `ARCHITECTURE_OLD_SYSTEM.md`; this repo rebuilds the behavior phase by phase with explicit LangGraph orchestration.
+LangGraph-powered implementation of a generic portfolio assistant.
 
 This implementation's architecture and decision log live in `LANGGRAPH_ARCHITECTURE.md`.
 
-## Phase 0/1 Scope
+## Current Scope
 
 - FastAPI application
 - `uv` project setup
-- Minimal LangGraph `StateGraph`
-- Nodes for ingest, context resolution, relevance classification, answer generation, and friendly off-topic responses
-- Conditional routing for relevant vs. irrelevant prompts
+- LangGraph `StateGraph`
+- Nodes for ingest, context resolution, relevance classification, retrieval planning, retrieval, context merge, answer generation, and friendly off-topic responses
+- Conditional routing for portfolio, identity, and off-topic prompts
 - Real OpenAI calls through `langchain-openai`
 - File-backed system prompts under `app/prompts/`
 
