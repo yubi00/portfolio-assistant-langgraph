@@ -51,7 +51,7 @@ uv sync --dev
 Copy-Item .env.example .env
 ```
 
-Fill in `OPENAI_API_KEY` in `.env`. Optional: set `ASSISTANT_SUBJECT` and `PORTFOLIO_CONTEXT` for a specific portfolio owner.
+Fill in `OPENAI_API_KEY` in `.env`. Optional: set `ASSISTANT_SUBJECT`, `GITHUB_OWNER`, and `GITHUB_TOKEN`.
 
 ## Run
 
@@ -83,14 +83,41 @@ Interactive prompt loop:
 uv run portfolio-assistant
 ```
 
-Use `--subject` and `--context` to override `.env` values for a single run:
+Use `--subject` to override the configured portfolio subject for a single run:
 
 ```powershell
-uv run portfolio-assistant "What skills are strongest?" `
-  --subject "Alex" `
-  --context "Alex is a backend engineer with Python, FastAPI, and LangGraph experience."
+uv run portfolio-assistant "What projects has Yubi built?" --subject "Yubi"
 ```
+
+Use `--context` only for temporary ad-hoc facts during manual testing. Prefer `--resume-path` for profile, skills, and work-history data.
+
+Use `--resume-path` when testing resume/work-history questions without editing `.env`:
+
+```powershell
+uv run portfolio-assistant "what is Yubi's work experience?" `
+  --subject "Yubi" `
+  --resume-path "data/processed/resume.md" `
+  --show-trace
+```
+
+For PDF resumes, convert to Markdown first:
+
+```powershell
+uv run python scripts/convert_resume_pdf.py resume.pdf data/processed/resume.md
+```
+
+Resume files and processed outputs are ignored by git because they usually contain private data.
+
+## Logging
+
+The app logs graph node execution and route decisions with Python's standard `logging` module.
+
+```powershell
+uv run portfolio-assistant "who are you" --show-trace --log-level INFO
+```
+
+Use `--log-level DEBUG` for more verbose local runs, or `--log-level WARNING` when you only want warnings/errors. Use `--no-log-color` to disable ANSI colors.
 
 ## Current Limitation
 
-Phase 1 does not retrieve GitHub, resume, or docs data yet. If `PORTFOLIO_CONTEXT` is empty, the assistant must say that it does not have enough portfolio data instead of inventing details.
+Resume PDF/DOCX ingestion is still manual: convert PDF to Markdown first, then pass the processed file with `--resume-path`. Vector/RAG retrieval is intentionally deferred.

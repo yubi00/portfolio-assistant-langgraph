@@ -3,14 +3,30 @@ from app.schemas import PromptResponse
 
 
 def test_build_parser_accepts_one_shot_prompt():
-    args = cli.build_parser().parse_args(["Tell", "me", "about", "projects", "--show-trace"])
+    args = cli.build_parser().parse_args(
+        [
+            "Tell",
+            "me",
+            "about",
+            "projects",
+            "--resume-path",
+            "resume.md",
+            "--log-level",
+            "DEBUG",
+            "--no-log-color",
+            "--show-trace",
+        ]
+    )
 
     assert " ".join(args.prompt) == "Tell me about projects"
+    assert args.resume_path == "resume.md"
+    assert args.log_level == "DEBUG"
+    assert args.no_log_color is True
     assert args.show_trace is True
 
 
 def test_main_runs_one_shot_prompt(monkeypatch, capsys):
-    async def fake_run_once(prompt, subject, context, show_trace):
+    async def fake_run_once(prompt, subject, context, resume_path, docs_path, show_trace):
         response = PromptResponse(
             answer=f"answer: {prompt}",
             is_relevant=True,

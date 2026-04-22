@@ -8,3 +8,6 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 
+# Local/private resume inputs and processed outputs.
+resume.pdf
+data/processed/

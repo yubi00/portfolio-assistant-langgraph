@@ -132,7 +132,9 @@ Trade-off: excluding forks may hide meaningful fork-based contributions. A futur
 
 Resume strategy:
 
-- Current: load small resume/work-history text or Markdown files directly into context.
+- Current: load a small resume text or Markdown file directly into context. Work-history retrieval falls back to the same resume source because a normal 1-2 page resume already contains the experience section.
+- Local testing passes the resume source with `--resume-path`.
+- PDF resumes can be converted to Markdown with `scripts/convert_resume_pdf.py`.
 - Later: accept PDF/DOCX, normalize into Markdown/JSON during ingestion, then optionally chunk/index for RAG.
 
 Problem solved: a 1-2 page resume usually fits comfortably in context, so RAG is not required for the first useful version.
@@ -151,7 +153,8 @@ Current keys:
 - `rewritten_query`: context-resolved query
 - `messages`: optional prior conversation turns
 - `assistant_subject`: configurable portfolio subject, such as `Yubi`
-- `portfolio_context`: temporary Phase 1 grounding context
+- `portfolio_context`: optional ad-hoc per-request context for manual testing
+- `resume_path`: optional per-request resume text/Markdown path
 - `is_relevant`: compatibility boolean for answer-generation relevance
 - `intent`: short classifier label, such as `projects`, `professional_fit`, `assistant_identity`, or `user_task`
 - `route`: graph route category
@@ -232,7 +235,7 @@ Trade-off: one extra transport to maintain. The shared runner keeps the cost low
 
 Problem: the original docs mention Yubi, but a reusable portfolio assistant should work for any subject.
 
-Decision: make `ASSISTANT_SUBJECT`, `PORTFOLIO_CONTEXT`, `GITHUB_OWNER`, and `GITHUB_TOKEN` configuration-driven.
+Decision: make `ASSISTANT_SUBJECT`, `GITHUB_OWNER`, and `GITHUB_TOKEN` configuration-driven. Keep local resume files request-driven through `--resume-path` or API request fields.
 
 Trade-off: generic wording can be less personal until profile data is supplied. Later phases should introduce a profile document containing preferred name, pronouns, summary, resume, and tone preferences.
 
@@ -274,15 +277,15 @@ Trade-off: file I/O is introduced at prompt load time. Prompts are cached with `
 
 ---
 
-### 7. Ground Phase 1 Answers in Supplied Context
+### 7. Ground Answers in Retrieved Context
 
-Problem: without retrieval, the assistant has no factual portfolio data.
+Problem: the assistant should not rely on hardcoded profile text or global fallback context.
 
-Decision: `generate_answer` may only answer from `PORTFOLIO_CONTEXT` or per-request `--context`; otherwise it must say there is not enough data.
+Decision: `generate_answer` uses `merged_context` built from planned retrieval sources. Resume/profile-style information comes from the resume source, not a hardcoded profile env var. `--context` remains only for ad-hoc manual testing.
 
-Problem solved: no hallucinated portfolio details before retrieval exists.
+Problem solved: profile, skills, and work-history answers come from the same user-provided resume source.
 
-Trade-off: early answers are limited. This is acceptable because Phase 2/3 will add structured retrieval.
+Trade-off: CLI/API callers must provide a resume path until a proper upload/ingestion flow exists.
 
 ---
 
@@ -319,6 +322,18 @@ Decision: test graph routing with a fake assistant service and reserve real Open
 Problem solved: route regressions are caught quickly without requiring API keys in CI.
 
 Trade-off: fake-service tests do not prove prompt quality. We supplement with manual CLI checks during development.
+
+---
+
+### 11. Add Graph Execution Logging
+
+Problem: `node_trace` shows the final path, but it does not show duration, intermediate updates, or where a run is currently spending time.
+
+Decision: use Python's standard `logging` module with a central formatter, CLI log-level controls, node start/done/error logs, and route decision logs.
+
+Problem solved: local runs expose graph execution in real time without adding a new observability vendor.
+
+Trade-off: console logs are less queryable than structured JSON traces. Later observability work can add JSON logging and LangSmith while keeping these local logs useful.
 
 ---
 

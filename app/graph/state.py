@@ -19,6 +19,8 @@ class PortfolioState(TypedDict):
     messages: NotRequired[list[ConversationTurnState]]
     assistant_subject: NotRequired[str]
     portfolio_context: NotRequired[str]
+    resume_path: NotRequired[str]
+    docs_path: NotRequired[str]
     is_relevant: NotRequired[bool]
     intent: NotRequired[str]
     route: NotRequired[str]

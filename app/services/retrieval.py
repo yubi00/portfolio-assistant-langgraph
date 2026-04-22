@@ -15,19 +15,24 @@ class RetrievalResult(BaseModel):
 
 
 class PortfolioRetrievalService(Protocol):
-    async def retrieve_profile(self, assistant_subject: str, portfolio_context: str) -> RetrievalResult:
+    async def retrieve_profile(
+        self,
+        assistant_subject: str,
+        path_override: str | None = None,
+        inline_context: str = "",
+    ) -> RetrievalResult:
         ...
 
     async def retrieve_projects(self) -> RetrievalResult:
         ...
 
-    async def retrieve_resume(self) -> RetrievalResult:
+    async def retrieve_resume(self, path_override: str | None = None) -> RetrievalResult:
         ...
 
-    async def retrieve_work_history(self) -> RetrievalResult:
+    async def retrieve_work_history(self, path_override: str | None = None) -> RetrievalResult:
         ...
 
-    async def retrieve_docs(self) -> RetrievalResult:
+    async def retrieve_docs(self, path_override: str | None = None) -> RetrievalResult:
         ...
 
 
@@ -42,10 +47,22 @@ class ConfiguredPortfolioRetrievalService:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
-    async def retrieve_profile(self, assistant_subject: str, portfolio_context: str) -> RetrievalResult:
+    async def retrieve_profile(
+        self,
+        assistant_subject: str,
+        path_override: str | None = None,
+        inline_context: str = "",
+    ) -> RetrievalResult:
         content_parts = [f"Portfolio subject: {assistant_subject}"]
-        if portfolio_context.strip():
-            content_parts.append(portfolio_context.strip())
+        if inline_context.strip():
+            content_parts.append(inline_context.strip())
+
+        resume_result = await self.retrieve_resume(path_override)
+        if resume_result.content:
+            content_parts.append(resume_result.content)
+        elif resume_result.error:
+            return RetrievalResult(source=RetrievalSource.PROFILE, content="\n\n".join(content_parts), error=resume_result.error)
+
         return RetrievalResult(source=RetrievalSource.PROFILE, content="\n\n".join(content_parts))
 
     async def retrieve_projects(self) -> RetrievalResult:
@@ -100,18 +117,18 @@ class ConfiguredPortfolioRetrievalService:
             content=_format_repositories(repos[: self._settings.github_projects_limit]),
         )
 
-    async def retrieve_resume(self) -> RetrievalResult:
-        return _read_text_source(RetrievalSource.RESUME, self._settings.resume_path, "RESUME_PATH")
+    async def retrieve_resume(self, path_override: str | None = None) -> RetrievalResult:
+        return _read_text_source(RetrievalSource.RESUME, path_override, "resume path")
 
-    async def retrieve_work_history(self) -> RetrievalResult:
+    async def retrieve_work_history(self, path_override: str | None = None) -> RetrievalResult:
         return _read_text_source(
             RetrievalSource.WORK_HISTORY,
-            self._settings.work_history_path,
-            "WORK_HISTORY_PATH",
+            path_override,
+            "resume path",
         )
 
-    async def retrieve_docs(self) -> RetrievalResult:
-        return _read_text_source(RetrievalSource.DOCS, self._settings.docs_path, "DOCS_PATH")
+    async def retrieve_docs(self, path_override: str | None = None) -> RetrievalResult:
+        return _read_text_source(RetrievalSource.DOCS, path_override or self._settings.docs_path, "DOCS_PATH")
 
 
 def _read_text_source(source: RetrievalSource, configured_path: str | None, env_name: str) -> RetrievalResult:

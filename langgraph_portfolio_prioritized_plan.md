@@ -91,8 +91,10 @@ Status: complete for first retrieval-node implementation.
 
 Notes:
 - `projects` uses GitHub REST API.
-- `resume`, `work_history`, and `docs` use configured local text/markdown files for now.
-- PDF/DOCX ingestion and RAG are intentionally deferred.
+- `resume` and `work_history` use the same local resume text/markdown source by default.
+- CLI supports `--resume-path` for local testing without editing `.env`.
+- PDF-to-Markdown conversion helper exists in `scripts/convert_resume_pdf.py`.
+- Full PDF/DOCX ingestion and RAG are intentionally deferred.
 
 ---
 
@@ -156,9 +158,11 @@ Status: mostly complete for non-streaming Phase 1 API.
 
 ## Phase 9 - Observability
 
-- MUST [ ] Basic logging
+- MUST [x] Basic graph node and route logging
 - SHOULD [ ] Node-level tracing
 - NICE [ ] LangSmith integration
+
+Status: partially complete. Local logging exists; structured logs/tracing remain future work.
 
 ---
 

@@ -46,19 +46,19 @@ class FakeAssistantService:
 
 
 class FakeRetrievalService:
-    async def retrieve_profile(self, assistant_subject, portfolio_context):
+    async def retrieve_profile(self, assistant_subject, path_override=None, inline_context=""):
         return RetrievalResult(source=RetrievalSource.PROFILE, content=f"Profile for {assistant_subject}")
 
     async def retrieve_projects(self):
         return RetrievalResult(source=RetrievalSource.PROJECTS, content="Project data")
 
-    async def retrieve_resume(self):
+    async def retrieve_resume(self, path_override=None):
         return RetrievalResult(source=RetrievalSource.RESUME, content="Resume data")
 
-    async def retrieve_work_history(self):
+    async def retrieve_work_history(self, path_override=None):
         return RetrievalResult(source=RetrievalSource.WORK_HISTORY, content="Work history data")
 
-    async def retrieve_docs(self):
+    async def retrieve_docs(self, path_override=None):
         return RetrievalResult(source=RetrievalSource.DOCS, content="Docs data")
 
 
@@ -70,7 +70,6 @@ async def test_relevant_query_routes_to_generate_answer():
             "user_query": "Tell me about the first one",
             "messages": [{"user": "List projects", "assistant": "1. Example project"}],
             "assistant_subject": "Alex",
-            "portfolio_context": "Alex built Example project.",
         }
     )
 
@@ -80,7 +79,7 @@ async def test_relevant_query_routes_to_generate_answer():
     assert result["retrieval_sources"] == ["projects"]
     assert result["retrieval_reason"] == "Project questions need project data."
     assert result["project_context"] == "Project data"
-    assert result["merged_context"] == "[projects]\nProject data\n\n[fallback_context]\nAlex built Example project."
+    assert result["merged_context"] == "[projects]\nProject data"
     assert result["rewritten_query"] == "Tell me about the first project"
     assert result["final_answer"] == "Grounded answer for Alex: Tell me about the first project"
     assert result["node_trace"] == [
@@ -106,7 +105,6 @@ async def test_irrelevant_query_routes_to_friendly_response():
             "user_query": "What is the weather?",
             "messages": [],
             "assistant_subject": "Alex",
-            "portfolio_context": "",
         }
     )
 
@@ -131,7 +129,6 @@ async def test_assistant_identity_routes_to_intro_response():
             "user_query": "Who are you?",
             "messages": [],
             "assistant_subject": "Alex",
-            "portfolio_context": "",
         }
     )
 
@@ -156,7 +153,6 @@ async def test_user_project_help_routes_to_friendly_response():
             "user_query": "Can you help me fix bug in my TypeScript project?",
             "messages": [],
             "assistant_subject": "Alex",
-            "portfolio_context": "",
         }
     )
 
@@ -181,7 +177,6 @@ async def test_skill_query_can_plan_multiple_sources():
             "user_query": "What AI skills does Alex have?",
             "messages": [],
             "assistant_subject": "Alex",
-            "portfolio_context": "Alex has AI project experience.",
         }
     )
 

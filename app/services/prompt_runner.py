@@ -15,7 +15,9 @@ async def run_prompt(request: PromptRequest, settings: Settings) -> PromptRespon
         "user_query": request.prompt,
         "messages": [turn.model_dump() for turn in request.history],
         "assistant_subject": request.assistant_subject or settings.assistant_subject,
-        "portfolio_context": request.portfolio_context if request.portfolio_context is not None else settings.portfolio_context,
+        "portfolio_context": request.portfolio_context or "",
+        "resume_path": request.resume_path,
+        "docs_path": request.docs_path or settings.docs_path,
     }
 
     result = await graph.ainvoke(initial_state)

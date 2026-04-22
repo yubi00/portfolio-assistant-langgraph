@@ -11,6 +11,8 @@ class PromptRequest(BaseModel):
     history: list[ConversationTurn] = Field(default_factory=list)
     assistant_subject: str | None = None
     portfolio_context: str | None = None
+    resume_path: str | None = None
+    docs_path: str | None = None
 
 
 class PromptResponse(BaseModel):

@@ -1,5 +1,6 @@
 from app.config import Settings
 from app.graph.constants import NodeName, RetrievalSource
+from app.graph.observability import log_node, skipped_update
 from app.graph.state import PortfolioState
 from app.services.assistant import AssistantService
 from app.services.retrieval import PortfolioRetrievalService, RetrievalResult
@@ -22,6 +23,7 @@ class PortfolioGraphNodes:
         self._retrieval_service = retrieval_service
         self._settings = settings
 
+    @log_node(NodeName.INGEST_USER_MESSAGE)
     async def ingest_user_message(self, state: PortfolioState) -> dict:
         user_query = state["user_query"].strip()
         if not user_query:
@@ -33,6 +35,7 @@ class PortfolioGraphNodes:
             "node_trace": [NodeName.INGEST_USER_MESSAGE],
         }
 
+    @log_node(NodeName.RESOLVE_CONTEXT)
     async def resolve_context(self, state: PortfolioState) -> dict:
         rewritten_query = await self._assistant_service.resolve_context(
             query=state["rewritten_query"],
@@ -43,6 +46,7 @@ class PortfolioGraphNodes:
             "node_trace": [NodeName.RESOLVE_CONTEXT],
         }
 
+    @log_node(NodeName.CLASSIFY_RELEVANCE)
     async def classify_relevance(self, state: PortfolioState) -> dict:
         decision = await self._assistant_service.classify_relevance(
             query=state["rewritten_query"],
@@ -55,6 +59,7 @@ class PortfolioGraphNodes:
             "node_trace": [NodeName.CLASSIFY_RELEVANCE],
         }
 
+    @log_node(NodeName.ASSISTANT_INTRO)
     async def assistant_intro(self, state: PortfolioState) -> dict:
         answer = self._assistant_service.build_assistant_intro(
             assistant_subject=state.get("assistant_subject", "the portfolio owner")
@@ -64,6 +69,7 @@ class PortfolioGraphNodes:
             "node_trace": [NodeName.ASSISTANT_INTRO],
         }
 
+    @log_node(NodeName.PLAN_RETRIEVAL)
     async def plan_retrieval(self, state: PortfolioState) -> dict:
         plan = await self._assistant_service.plan_retrieval(
             query=state["rewritten_query"],
@@ -76,44 +82,51 @@ class PortfolioGraphNodes:
             "node_trace": [NodeName.PLAN_RETRIEVAL],
         }
 
+    @log_node(NodeName.RETRIEVE_PROFILE)
     async def retrieve_profile(self, state: PortfolioState) -> dict:
         if not _source_was_planned(state, RetrievalSource.PROFILE):
-            return {"node_trace": [NodeName.RETRIEVE_PROFILE]}
+            return skipped_update(NodeName.RETRIEVE_PROFILE, "profile source was not planned")
 
         result = await self._retrieval_service.retrieve_profile(
             assistant_subject=state.get("assistant_subject", "the portfolio owner"),
-            portfolio_context=state.get("portfolio_context", ""),
+            path_override=state.get("resume_path"),
+            inline_context=state.get("portfolio_context", ""),
         )
         return _result_update(result, "profile_context", NodeName.RETRIEVE_PROFILE)
 
+    @log_node(NodeName.RETRIEVE_PROJECTS)
     async def retrieve_projects(self, state: PortfolioState) -> dict:
         if not _source_was_planned(state, RetrievalSource.PROJECTS):
-            return {"node_trace": [NodeName.RETRIEVE_PROJECTS]}
+            return skipped_update(NodeName.RETRIEVE_PROJECTS, "projects source was not planned")
 
         result = await self._retrieval_service.retrieve_projects()
         return _result_update(result, "project_context", NodeName.RETRIEVE_PROJECTS)
 
+    @log_node(NodeName.RETRIEVE_RESUME)
     async def retrieve_resume(self, state: PortfolioState) -> dict:
         if not _source_was_planned(state, RetrievalSource.RESUME):
-            return {"node_trace": [NodeName.RETRIEVE_RESUME]}
+            return skipped_update(NodeName.RETRIEVE_RESUME, "resume source was not planned")
 
-        result = await self._retrieval_service.retrieve_resume()
+        result = await self._retrieval_service.retrieve_resume(state.get("resume_path"))
         return _result_update(result, "resume_context", NodeName.RETRIEVE_RESUME)
 
+    @log_node(NodeName.RETRIEVE_WORK_HISTORY)
     async def retrieve_work_history(self, state: PortfolioState) -> dict:
         if not _source_was_planned(state, RetrievalSource.WORK_HISTORY):
-            return {"node_trace": [NodeName.RETRIEVE_WORK_HISTORY]}
+            return skipped_update(NodeName.RETRIEVE_WORK_HISTORY, "work_history source was not planned")
 
-        result = await self._retrieval_service.retrieve_work_history()
+        result = await self._retrieval_service.retrieve_work_history(state.get("resume_path"))
         return _result_update(result, "work_history_context", NodeName.RETRIEVE_WORK_HISTORY)
 
+    @log_node(NodeName.RETRIEVE_DOCS)
     async def retrieve_docs(self, state: PortfolioState) -> dict:
         if not _source_was_planned(state, RetrievalSource.DOCS):
-            return {"node_trace": [NodeName.RETRIEVE_DOCS]}
+            return skipped_update(NodeName.RETRIEVE_DOCS, "docs source was not planned")
 
-        result = await self._retrieval_service.retrieve_docs()
+        result = await self._retrieval_service.retrieve_docs(state.get("docs_path"))
         return _result_update(result, "docs_context", NodeName.RETRIEVE_DOCS)
 
+    @log_node(NodeName.MERGE_NORMALIZE_CONTEXT)
     async def merge_normalize_context(self, state: PortfolioState) -> dict:
         sections = []
         for label, key in (
@@ -122,7 +135,7 @@ class PortfolioGraphNodes:
             ("resume", "resume_context"),
             ("work_history", "work_history_context"),
             ("docs", "docs_context"),
-            ("fallback_context", "portfolio_context"),
+            ("inline_context", "portfolio_context"),
         ):
             content = state.get(key, "").strip()
             if content:
@@ -137,6 +150,7 @@ class PortfolioGraphNodes:
             "node_trace": [NodeName.MERGE_NORMALIZE_CONTEXT],
         }
 
+    @log_node(NodeName.GENERATE_ANSWER)
     async def generate_answer(self, state: PortfolioState) -> dict:
         answer = await self._assistant_service.generate_answer(
             query=state["rewritten_query"],
@@ -148,6 +162,7 @@ class PortfolioGraphNodes:
             "node_trace": [NodeName.GENERATE_ANSWER],
         }
 
+    @log_node(NodeName.FRIENDLY_RESPONSE)
     async def friendly_response(self, state: PortfolioState) -> dict:
         answer = self._assistant_service.build_friendly_response(
             assistant_subject=state.get("assistant_subject", "the portfolio owner"),

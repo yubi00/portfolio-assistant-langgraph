@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from pydantic import ValidationError
 
 from app.config import get_settings
+from app.logging_config import configure_logging
 from app.schemas import ConversationTurn, PromptRequest, PromptResponse
 from app.services.prompt_runner import run_prompt
 
@@ -26,24 +27,61 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--context",
-        help="Inline portfolio context for this run. Defaults to PORTFOLIO_CONTEXT.",
+        help="Inline extra context for this run. Prefer --resume-path for profile/resume data.",
+    )
+    parser.add_argument(
+        "--resume-path",
+        help="Path to a local text/Markdown resume source for this run.",
+    )
+    parser.add_argument(
+        "--docs-path",
+        help="Path to a local text/Markdown docs source for this run. Defaults to DOCS_PATH.",
     )
     parser.add_argument(
         "--show-trace",
         action="store_true",
         help="Print the graph node trace after each answer.",
     )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Console log level. Defaults to LOG_LEVEL.",
+    )
+    parser.add_argument(
+        "--no-log-color",
+        action="store_true",
+        help="Disable ANSI colors in console logs.",
+    )
     return parser
 
 
-async def run_once(prompt: str, subject: str | None, context: str | None, show_trace: bool) -> PromptResponse:
-    request = PromptRequest(prompt=prompt, assistant_subject=subject, portfolio_context=context)
+async def run_once(
+    prompt: str,
+    subject: str | None,
+    context: str | None,
+    resume_path: str | None,
+    docs_path: str | None,
+    show_trace: bool,
+) -> PromptResponse:
+    request = PromptRequest(
+        prompt=prompt,
+        assistant_subject=subject,
+        portfolio_context=context,
+        resume_path=resume_path,
+        docs_path=docs_path,
+    )
     response = await run_prompt(request, get_settings())
     _print_response(response, show_trace)
     return response
 
 
-async def run_interactive(subject: str | None, context: str | None, show_trace: bool) -> None:
+async def run_interactive(
+    subject: str | None,
+    context: str | None,
+    resume_path: str | None,
+    docs_path: str | None,
+    show_trace: bool,
+) -> None:
     print("Portfolio assistant CLI. Type 'exit' or 'quit' to stop.")
     history: list[ConversationTurn] = []
 
@@ -59,6 +97,8 @@ async def run_interactive(subject: str | None, context: str | None, show_trace: 
             history=history,
             assistant_subject=subject,
             portfolio_context=context,
+            resume_path=resume_path,
+            docs_path=docs_path,
         )
         response = await run_prompt(request, get_settings())
         _print_response(response, show_trace)
@@ -69,12 +109,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     prompt = " ".join(args.prompt).strip()
+    settings = get_settings()
+    configure_logging(
+        args.log_level or settings.log_level,
+        use_color=settings.log_color and not args.no_log_color,
+        force=True,
+    )
 
     try:
         if prompt:
-            asyncio.run(run_once(prompt, args.subject, args.context, args.show_trace))
+            asyncio.run(run_once(prompt, args.subject, args.context, args.resume_path, args.docs_path, args.show_trace))
         else:
-            asyncio.run(run_interactive(args.subject, args.context, args.show_trace))
+            asyncio.run(run_interactive(args.subject, args.context, args.resume_path, args.docs_path, args.show_trace))
     except KeyboardInterrupt:
         return EXIT_KEYBOARD_INTERRUPT
     except (ValidationError, ValueError) as exc:
