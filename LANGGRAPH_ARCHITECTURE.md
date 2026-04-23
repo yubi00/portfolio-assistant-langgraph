@@ -14,13 +14,12 @@ Implemented phases:
 - Phase 1: minimal LangGraph graph with context resolution, relevance classification, explicit routing, answer generation, and friendly redirect
 - Phase 2: retrieval planning with explicit source categories and debug-visible planned sources
 - Phase 3A: retrieval nodes, GitHub project retrieval, local resume/docs retrieval, and context merging
-- Phase 6A: API session contract, app-level session store, and explicit `save_memory` graph step
+- Phase 6A/B: API session contract, app-level session store, explicit `save_memory` graph step, and checkpointer evaluation
 
 Not implemented yet:
 
 - PDF/DOCX resume ingestion
 - vector/RAG-backed resume retrieval
-- LangGraph checkpointer-backed memory
 - streaming
 - observability and reliability layers
 
@@ -208,7 +207,7 @@ Decision: keep the first persisted-memory implementation outside LangGraph check
 
 Problem solved: follow-up questions can now work across API requests, not just inside one running CLI process.
 
-Trade-off: this store is process-local and non-durable. Sessions are lost on restart and do not scale across multiple app instances. This is acceptable for the current learning phase; LangGraph checkpointers or an external store remain the next upgrade path.
+Trade-off: this store is process-local and non-durable. Sessions are lost on restart and do not scale across multiple app instances. This is acceptable for the current learning phase; LangGraph checkpointers are deferred until the project needs durable sessions, multi-instance memory, interrupt/resume workflows, or broader persisted graph state.
 
 ---
 
@@ -398,6 +397,18 @@ Trade-off: the first persisted-memory implementation is local to one process and
 
 ---
 
+### 14. Defer LangGraph Checkpointers For This Repo
+
+Problem: LangGraph checkpointers are useful for thread persistence, durable execution, interrupt/resume, and richer graph-state recovery, but they add another persistence abstraction and more infrastructure.
+
+Decision: do not adopt checkpointers in this portfolio assistant yet. Keep the current bounded app-level session store as the memory mechanism for this repo.
+
+Problem solved: the project keeps a simpler memory model that is easier to inspect, explain, and test while still supporting contextual follow-up questions across API requests.
+
+Trade-off: sessions are not durable across restarts and do not scale across multiple instances. We should revisit checkpointers only if the assistant needs durable sessions, shared multi-instance memory, human-in-the-loop interrupt/resume flows, or richer persisted graph state than recent conversation history.
+
+---
+
 ## Current Runtime Examples
 
 Assistant identity:
@@ -469,4 +480,4 @@ Current response shape:
 
 - `session_id` is always returned so clients can continue the same conversation explicitly
 
-The current implementation uses a simple app-level session store. LangGraph checkpointers will be evaluated after the request/response contract and lifecycle behavior are stable.
+The current implementation uses a simple app-level session store. LangGraph checkpointers were evaluated and intentionally deferred because this repo currently needs only bounded short-term conversation memory.

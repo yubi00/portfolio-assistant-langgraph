@@ -70,6 +70,8 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/prompt `
 
 API session memory is now available through `session_id`. Omit it on the first request, then reuse the returned `session_id` on follow-up requests.
 
+The current memory model is a bounded app-level session store. LangGraph checkpointers were evaluated and intentionally deferred because this repo currently only needs short-term conversational memory, not durable thread persistence.
+
 ## CLI
 
 One-shot prompt:

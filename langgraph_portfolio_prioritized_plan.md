@@ -136,17 +136,22 @@ Status: partially complete. Phase 1 grounding exists; retrieval-grounded answer 
 - SHOULD [x] Context-aware responses from provided session history
 - SHOULD [x] API `session_id` support for stored session history
 - SHOULD [x] Start with a simple app-level session store before introducing heavier memory infrastructure
-- SHOULD [ ] LangGraph checkpointer evaluation for persisted thread memory
-- SHOULD [ ] Decide when to adopt LangGraph checkpointers after the session contract is stable
+- SHOULD [x] LangGraph checkpointer evaluation for persisted thread memory
+- SHOULD [x] Decide when to adopt LangGraph checkpointers after the session contract is stable
 - NICE [ ] Advanced memory strategies
 
-Status: Phase 6A is complete for app-level memory. The graph now owns `save_memory`, the API supports `session_id`, and the app persists bounded session history in-process. LangGraph checkpointer evaluation and more advanced memory strategies remain.
+Status: complete for current scope. The graph now owns `save_memory`, the API supports `session_id`, and the app persists bounded session history in-process. LangGraph checkpointers were evaluated and intentionally deferred for this project stage.
 
 Current implemented contract:
 - request: optional `session_id`
 - response: always include `session_id`
 - omitted `session_id` means create a new session
 - unknown or expired `session_id` should surface as a session error, not silently fork a new conversation
+
+Checkpointer decision:
+- keep the current app-level session store for now
+- do not adopt LangGraph checkpointers in this repo yet
+- revisit checkpointers only if we need durable sessions across restarts, multi-instance/shared memory, human-in-the-loop interrupt/resume, or broader graph-state persistence than bounded chat history
 
 ---
 
@@ -202,6 +207,6 @@ Status: partially complete. Local logging exists; structured logs/tracing remain
 
 - MUST [x] End-to-end minimal graph works
 - MUST [ ] Multi-source answers work
-- MUST [ ] Follow-ups work with real session memory
+- MUST [x] Follow-ups work with real session memory
 - SHOULD [ ] Streaming works
 - NICE [ ] Observability + reliability layers added
