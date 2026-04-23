@@ -23,7 +23,6 @@ NODE_LABELS = {
     NodeName.RETRIEVE_PROFILE: "05 retrieve:profile",
     NodeName.RETRIEVE_PROJECTS: "05 retrieve:projects",
     NodeName.RETRIEVE_RESUME: "05 retrieve:resume",
-    NodeName.RETRIEVE_WORK_HISTORY: "05 retrieve:work",
     NodeName.RETRIEVE_DOCS: "05 retrieve:docs",
     NodeName.MERGE_NORMALIZE_CONTEXT: "06 merge",
     NodeName.GENERATE_ANSWER: "07 answer",
@@ -35,7 +34,6 @@ RETRIEVAL_NODE_SOURCES = {
     NodeName.RETRIEVE_PROFILE: RetrievalSource.PROFILE,
     NodeName.RETRIEVE_PROJECTS: RetrievalSource.PROJECTS,
     NodeName.RETRIEVE_RESUME: RetrievalSource.RESUME,
-    NodeName.RETRIEVE_WORK_HISTORY: RetrievalSource.WORK_HISTORY,
     NodeName.RETRIEVE_DOCS: RetrievalSource.DOCS,
 }
 

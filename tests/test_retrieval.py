@@ -33,15 +33,3 @@ async def test_project_retrieval_reports_missing_github_owner():
     assert result.source == RetrievalSource.PROJECTS
     assert result.content == ""
     assert result.error == "GITHUB_OWNER is not configured, so project retrieval was skipped."
-
-
-async def test_work_history_falls_back_to_resume_path(tmp_path):
-    resume_path = tmp_path / "resume.md"
-    resume_path.write_text("Experience section from resume.", encoding="utf-8")
-    service = ConfiguredPortfolioRetrievalService(Settings(_env_file=None, OPENAI_API_KEY="test"))
-
-    result = await service.retrieve_work_history(str(resume_path))
-
-    assert result.source == RetrievalSource.WORK_HISTORY
-    assert result.content == "Experience section from resume."
-    assert result.error is None

@@ -37,7 +37,6 @@ def route_to_retrievers(state: PortfolioState) -> list[Send]:
         RetrievalSource.PROFILE.value: NodeName.RETRIEVE_PROFILE,
         RetrievalSource.PROJECTS.value: NodeName.RETRIEVE_PROJECTS,
         RetrievalSource.RESUME.value: NodeName.RETRIEVE_RESUME,
-        RetrievalSource.WORK_HISTORY.value: NodeName.RETRIEVE_WORK_HISTORY,
         RetrievalSource.DOCS.value: NodeName.RETRIEVE_DOCS,
     }
     sends = [

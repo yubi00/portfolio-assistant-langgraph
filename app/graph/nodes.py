@@ -110,14 +110,6 @@ class PortfolioGraphNodes:
         result = await self._retrieval_service.retrieve_resume(state.get("resume_path"))
         return _result_update(result, "resume_context", NodeName.RETRIEVE_RESUME)
 
-    @log_node(NodeName.RETRIEVE_WORK_HISTORY)
-    async def retrieve_work_history(self, state: PortfolioState) -> dict:
-        if not _source_was_planned(state, RetrievalSource.WORK_HISTORY):
-            return skipped_update(NodeName.RETRIEVE_WORK_HISTORY, "work_history source was not planned")
-
-        result = await self._retrieval_service.retrieve_work_history(state.get("resume_path"))
-        return _result_update(result, "work_history_context", NodeName.RETRIEVE_WORK_HISTORY)
-
     @log_node(NodeName.RETRIEVE_DOCS)
     async def retrieve_docs(self, state: PortfolioState) -> dict:
         if not _source_was_planned(state, RetrievalSource.DOCS):
@@ -133,7 +125,6 @@ class PortfolioGraphNodes:
             ("profile", "profile_context"),
             ("projects", "project_context"),
             ("resume", "resume_context"),
-            ("work_history", "work_history_context"),
             ("docs", "docs_context"),
             ("inline_context", "portfolio_context"),
         ):

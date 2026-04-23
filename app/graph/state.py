@@ -29,7 +29,6 @@ class PortfolioState(TypedDict):
     profile_context: NotRequired[str]
     project_context: NotRequired[str]
     resume_context: NotRequired[str]
-    work_history_context: NotRequired[str]
     docs_context: NotRequired[str]
     merged_context: NotRequired[str]
     retrieval_errors: NotRequired[Annotated[list[str], operator.add]]

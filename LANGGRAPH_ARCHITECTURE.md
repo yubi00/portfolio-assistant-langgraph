@@ -13,7 +13,7 @@ Implemented phases:
 - Phase 0: uv project, FastAPI app, CLI, env template, tests
 - Phase 1: minimal LangGraph graph with context resolution, relevance classification, explicit routing, answer generation, assistant intro, and friendly redirect
 - Phase 2: retrieval planning with explicit source categories and debug-visible planned sources
-- Phase 3A: retrieval nodes, GitHub project retrieval, local resume/docs/work-history retrieval, and context merging
+- Phase 3A: retrieval nodes, GitHub project retrieval, local resume/docs retrieval, and context merging
 
 Not implemented yet:
 
@@ -68,12 +68,10 @@ flowchart TD
     Plan -. selected .-> Profile[retrieve_profile]
     Plan -. selected .-> Projects[retrieve_projects]
     Plan -. selected .-> Resume[retrieve_resume]
-    Plan -. selected .-> Work[retrieve_work_history]
     Plan -. selected .-> Docs[retrieve_docs]
     Profile --> Merge[merge_normalize_context]
     Projects --> Merge
     Resume --> Merge
-    Work --> Merge
     Docs --> Merge
     Merge --> Answer[generate_answer]
     Answer --> END([END])
@@ -99,8 +97,7 @@ Phase 2 added source planning. Phase 3A adds source retrieval and context mergin
 |---|---|
 | `profile` | Identity, contact details, preferred summary, location, and links |
 | `projects` | GitHub or portfolio projects, READMEs, stacks, outcomes, and links |
-| `resume` | Resume facts, education, certifications, skills, achievements, and role summaries |
-| `work_history` | Employment timeline, companies, responsibilities, and domain experience |
+| `resume` | Resume facts, employment timeline, companies, responsibilities, education, certifications, skills, achievements, and role summaries |
 | `docs` | Long-form documents, case studies, blog posts, notes, or custom knowledge |
 
 Decision: keep source planning separate from source execution.
@@ -114,7 +111,7 @@ Trade-off: Phase 2 adds an extra LLM call for relevant queries before retrieval 
 The first retrieval implementation uses:
 
 - GitHub REST API for `projects`; forks are excluded by default for "built projects" accuracy
-- local text/markdown files for `resume`, `work_history`, and `docs`
+- local text/markdown files for `resume` and `docs`
 - resume-derived profile context for `profile`
 
 The graph dispatches only planned retrieval sources with LangGraph dynamic sends. Independent retrieval nodes can run concurrently, then join at `merge_normalize_context`.
@@ -136,7 +133,7 @@ Trade-off: excluding forks may hide meaningful fork-based contributions. A futur
 
 Resume strategy:
 
-- Current: load a small resume text or Markdown file directly into context. Work-history retrieval falls back to the same resume source because a normal 1-2 page resume already contains the experience section.
+- Current: load a small resume text or Markdown file directly into context. Work-experience questions use the `resume` source because a normal 1-2 page resume already contains the experience section.
 - Local testing passes the resume source with `--resume-path`.
 - PDF resumes can be converted to Markdown with `scripts/convert_resume_pdf.py`.
 - Later: accept PDF/DOCX, normalize into Markdown/JSON during ingestion, then optionally chunk/index for RAG.
@@ -164,7 +161,7 @@ Current keys:
 - `route`: graph route category
 - `retrieval_sources`: planned source categories for portfolio queries
 - `retrieval_reason`: short explanation of why those sources were selected
-- `profile_context`, `project_context`, `resume_context`, `work_history_context`, `docs_context`: raw retrieved source context
+- `profile_context`, `project_context`, `resume_context`, `docs_context`: raw retrieved source context
 - `merged_context`: normalized context passed to answer generation
 - `retrieval_errors`: non-fatal retrieval errors collected from source nodes
 - `final_answer`: final response text
@@ -287,7 +284,7 @@ Problem: the assistant should not rely on hardcoded profile text or global fallb
 
 Decision: `generate_answer` uses `merged_context` built from planned retrieval sources. Resume/profile-style information comes from the resume source, not a hardcoded profile env var. `--context` remains only for ad-hoc manual testing.
 
-Problem solved: profile, skills, and work-history answers come from the same user-provided resume source.
+Problem solved: profile, skills, and work-experience answers come from the same user-provided resume source.
 
 Trade-off: CLI/API callers must provide a resume path until a proper upload/ingestion flow exists.
 

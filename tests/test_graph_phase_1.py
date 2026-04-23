@@ -55,9 +55,6 @@ class FakeRetrievalService:
     async def retrieve_resume(self, path_override=None):
         return RetrievalResult(source=RetrievalSource.RESUME, content="Resume data")
 
-    async def retrieve_work_history(self, path_override=None):
-        return RetrievalResult(source=RetrievalSource.WORK_HISTORY, content="Work history data")
-
     async def retrieve_docs(self, path_override=None):
         return RetrievalResult(source=RetrievalSource.DOCS, content="Docs data")
 
@@ -190,6 +187,5 @@ async def test_skill_query_can_plan_multiple_sources():
     assert "retrieve_projects" in result["node_trace"]
     assert "retrieve_resume" in result["node_trace"]
     assert "retrieve_profile" not in result["node_trace"]
-    assert "retrieve_work_history" not in result["node_trace"]
     assert "retrieve_docs" not in result["node_trace"]
     assert result["node_trace"][-2:] == ["merge_normalize_context", "generate_answer"]

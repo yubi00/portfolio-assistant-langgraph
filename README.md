@@ -31,13 +31,12 @@ Portfolio queries now pass through a planning node before answer generation. The
 - `profile`
 - `projects`
 - `resume`
-- `work_history`
 - `docs`
 
 Phase 3 adds first-pass retrieval:
 
 - `projects` from GitHub using `GITHUB_OWNER` and optional `GITHUB_TOKEN`; forks are excluded by default
-- `resume`, `work_history`, and `docs` from local text/markdown files
+- `resume` and `docs` from local text/markdown files
 - merged context passed into answer generation
 - planned retrieval sources fan out to selected retrievers and then merge before answer generation
 
@@ -88,9 +87,9 @@ Use `--subject` to override the configured portfolio subject for a single run:
 uv run portfolio-assistant "What projects has Yubi built?" --subject "Yubi"
 ```
 
-Use `--context` only for temporary ad-hoc facts during manual testing. Prefer `--resume-path` for profile, skills, and work-history data.
+Use `--context` only for temporary ad-hoc facts during manual testing. Prefer `--resume-path` for profile, skills, and work experience data.
 
-Use `--resume-path` when testing resume/work-history questions without editing `.env`:
+Use `--resume-path` when testing resume/work-experience questions without editing `.env`:
 
 ```powershell
 uv run portfolio-assistant "what is Yubi's work experience?" `

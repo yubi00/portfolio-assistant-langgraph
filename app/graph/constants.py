@@ -9,7 +9,6 @@ class NodeName(StrEnum):
     RETRIEVE_PROFILE = "retrieve_profile"
     RETRIEVE_PROJECTS = "retrieve_projects"
     RETRIEVE_RESUME = "retrieve_resume"
-    RETRIEVE_WORK_HISTORY = "retrieve_work_history"
     RETRIEVE_DOCS = "retrieve_docs"
     MERGE_NORMALIZE_CONTEXT = "merge_normalize_context"
     ASSISTANT_INTRO = "assistant_intro"
@@ -27,5 +26,4 @@ class RetrievalSource(StrEnum):
     PROFILE = "profile"
     PROJECTS = "projects"
     RESUME = "resume"
-    WORK_HISTORY = "work_history"
     DOCS = "docs"

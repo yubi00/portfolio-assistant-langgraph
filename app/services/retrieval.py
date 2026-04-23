@@ -29,9 +29,6 @@ class PortfolioRetrievalService(Protocol):
     async def retrieve_resume(self, path_override: str | None = None) -> RetrievalResult:
         ...
 
-    async def retrieve_work_history(self, path_override: str | None = None) -> RetrievalResult:
-        ...
-
     async def retrieve_docs(self, path_override: str | None = None) -> RetrievalResult:
         ...
 
@@ -119,13 +116,6 @@ class ConfiguredPortfolioRetrievalService:
 
     async def retrieve_resume(self, path_override: str | None = None) -> RetrievalResult:
         return _read_text_source(RetrievalSource.RESUME, path_override, "resume path")
-
-    async def retrieve_work_history(self, path_override: str | None = None) -> RetrievalResult:
-        return _read_text_source(
-            RetrievalSource.WORK_HISTORY,
-            path_override,
-            "resume path",
-        )
 
     async def retrieve_docs(self, path_override: str | None = None) -> RetrievalResult:
         return _read_text_source(RetrievalSource.DOCS, path_override or self._settings.docs_path, "DOCS_PATH")

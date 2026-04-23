@@ -59,10 +59,10 @@ Notes:
 ## Phase 2 - Retrieval Planning
 
 - MUST [x] `plan_retrieval` node
-- MUST [x] Define source categories: profile, projects, resume, work_history, docs
+- MUST [x] Define source categories: profile, projects, resume, docs
 - MUST [x] Routing logic works for multiple prompt types
 - SHOULD [x] Add richer intent/source planning through structured OpenAI output
-- SHOULD [ ] Define required user/profile inputs: GitHub owner, resume, work history, preferred display name
+- SHOULD [ ] Define required user/profile inputs: GitHub owner, resume, preferred display name
 - NICE [x] Debug output for source selection through CLI/API response fields
 
 Status: complete for planning-only Phase 2.
@@ -82,7 +82,6 @@ Notes:
 - MUST [x] Support multi-source queries
 - SHOULD [x] Service layer separation
 - SHOULD [x] GitHub retrieval uses configured token/owner
-- SHOULD [x] `retrieve_work_history` node
 - SHOULD [x] `retrieve_profile` node
 - NICE [ ] Optional web retrieval
 
@@ -90,7 +89,7 @@ Status: complete for first retrieval-node implementation.
 
 Notes:
 - `projects` uses GitHub REST API.
-- `resume` and `work_history` use the same local resume text/markdown source by default.
+- Work-experience answers use the `resume` source because the resume already contains employment history.
 - CLI supports `--resume-path` for local testing without editing `.env`.
 - PDF-to-Markdown conversion helper exists in `scripts/convert_resume_pdf.py`.
 - Full PDF/DOCX ingestion and RAG are intentionally deferred.
