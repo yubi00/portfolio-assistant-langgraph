@@ -8,6 +8,7 @@ class ConversationTurn(BaseModel):
 
 class PromptRequest(BaseModel):
     prompt: str = Field(min_length=1)
+    session_id: str | None = None
     history: list[ConversationTurn] = Field(default_factory=list)
     assistant_subject: str | None = None
     portfolio_context: str | None = None
@@ -17,6 +18,7 @@ class PromptRequest(BaseModel):
 
 class PromptResponse(BaseModel):
     answer: str
+    session_id: str | None = None
     is_relevant: bool
     intent: str | None = None
     route: str | None = None

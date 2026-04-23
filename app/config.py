@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     merged_context_max_chars: int = Field(default=12000, validation_alias="MERGED_CONTEXT_MAX_CHARS")
 
     context_history_window: int = Field(default=4, validation_alias="CONTEXT_HISTORY_WINDOW")
+    session_history_max_turns: int = Field(default=10, validation_alias="SESSION_HISTORY_MAX_TURNS")
+    session_ttl_minutes: int = Field(default=30, validation_alias="SESSION_TTL_MINUTES")
 
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
     log_color: bool = Field(default=True, validation_alias="LOG_COLOR")

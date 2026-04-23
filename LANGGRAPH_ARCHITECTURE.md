@@ -415,3 +415,26 @@ This document should be updated whenever a phase changes system behavior. Expect
 - Phase 8: streaming transport and event contract
 - Phase 9: logging, tracing, and LangSmith decisions
 - Phase 10: retries, fallbacks, timeout policy, and partial answers
+
+---
+
+## Planned Phase 6 Session Contract
+
+The Phase 6 API memory contract will use an application-level `session_id`.
+
+Planned request shape:
+
+- `POST /prompt`
+- body includes optional `session_id`
+
+Planned behavior:
+
+- if `session_id` is omitted, the API creates a new session and returns its id
+- if `session_id` is present and active, the API reuses stored history for that session
+- if `session_id` is present but missing or expired, the API should return a client-visible session error rather than silently creating a different conversation
+
+Planned response shape:
+
+- `session_id` is always returned so clients can continue the same conversation explicitly
+
+The first implementation will use a simple app-level session store. LangGraph checkpointers will be evaluated after the request/response contract and lifecycle behavior are stable.

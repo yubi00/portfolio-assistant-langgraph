@@ -23,6 +23,7 @@ async def run_prompt(request: PromptRequest, settings: Settings) -> PromptRespon
     result = await graph.ainvoke(initial_state)
     return PromptResponse(
         answer=result.get("final_answer", ""),
+        session_id=request.session_id,
         is_relevant=bool(result.get("is_relevant", False)),
         intent=result.get("intent"),
         route=result.get("route"),

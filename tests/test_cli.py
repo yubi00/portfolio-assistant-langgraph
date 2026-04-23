@@ -29,6 +29,7 @@ def test_main_runs_one_shot_prompt(monkeypatch, capsys):
     async def fake_run_once(prompt, subject, context, resume_path, docs_path, show_trace):
         response = PromptResponse(
             answer=f"answer: {prompt}",
+            session_id=None,
             is_relevant=True,
             intent="projects",
             route="portfolio_query",
