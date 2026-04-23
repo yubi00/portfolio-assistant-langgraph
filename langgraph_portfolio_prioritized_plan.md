@@ -38,6 +38,7 @@ Notes:
 - MUST [x] `generate_answer` node
 - MUST [x] Conditional routing
 - SHOULD [x] `resolve_context` node
+- SHOULD [x] History-aware query contextualization without brittle trigger phrase matching
 - SHOULD [x] Explicit route categories: `portfolio_query`, `assistant_identity`, `off_topic`
 - SHOULD [x] Dedicated `assistant_intro` node
 - NICE [x] Friendly response refinement
@@ -49,6 +50,7 @@ Status: complete for Phase 1.
 Notes:
 - Real OpenAI calls are wired through `langchain-openai`.
 - Graph behavior is tested with a fake assistant service, so unit tests do not require API keys.
+- `resolve_context` rewrites follow-up questions when prior messages exist, matching the history-aware retrieval pattern used in conversational RAG.
 - CLI smoke checks confirmed:
   - `"who are you"` routes to `assistant_intro`
   - user debugging requests route to `friendly_response`
@@ -125,12 +127,16 @@ Status: partially complete. Phase 1 grounding exists; retrieval-grounded answer 
 ## Phase 6 - Memory
 
 - MUST [x] Messages accepted in state
+- MUST [x] Interactive CLI keeps in-process conversation history for one running session
+- MUST [x] Context resolver uses a bounded 4-turn history window for multi-turn references
 - MUST [ ] `save_memory` node
 - MUST [ ] History trimming
-- SHOULD [ ] Context-aware responses from stored session history
+- SHOULD [x] Context-aware responses from provided session history
+- SHOULD [ ] API `session_id` support for stored session history
+- SHOULD [ ] LangGraph checkpointer evaluation for persisted thread memory
 - NICE [ ] Advanced memory strategies
 
-Status: partially complete. State accepts history for context resolution, but persistent/session memory is not implemented.
+Status: partially complete. State accepts history for context resolution and the CLI keeps in-process history, but persisted API session memory is not implemented.
 
 ---
 

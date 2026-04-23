@@ -13,6 +13,7 @@ from app.services.prompt_runner import run_prompt
 EXIT_SUCCESS = 0
 EXIT_ERROR = 1
 EXIT_KEYBOARD_INTERRUPT = 130
+SESSION_END_MESSAGE = "\nEnding portfolio assistant session."
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -86,8 +87,14 @@ async def run_interactive(
     history: list[ConversationTurn] = []
 
     while True:
-        prompt = input("> ").strip()
+        try:
+            prompt = input("> ").strip()
+        except EOFError:
+            print(SESSION_END_MESSAGE)
+            return
+
         if prompt.lower() in {"exit", "quit"}:
+            print(SESSION_END_MESSAGE)
             return
         if not prompt:
             continue
@@ -122,7 +129,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             asyncio.run(run_interactive(args.subject, args.context, args.resume_path, args.docs_path, args.show_trace))
     except KeyboardInterrupt:
-        return EXIT_KEYBOARD_INTERRUPT
+        print(SESSION_END_MESSAGE)
+        return EXIT_SUCCESS if not prompt else EXIT_KEYBOARD_INTERRUPT
     except (ValidationError, ValueError) as exc:
         parser.exit(EXIT_ERROR, f"error: {exc}\n")
     except Exception as exc:
@@ -134,8 +142,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _print_response(response: PromptResponse, show_trace: bool) -> None:
     print(response.answer)
     if show_trace:
+        if response.rewritten_query:
+            print(f"\nrewritten_query: {response.rewritten_query}")
         if response.retrieval_sources:
-            print(f"\nsources: {', '.join(response.retrieval_sources)}")
+            print(f"sources: {', '.join(response.retrieval_sources)}")
         if response.retrieval_reason:
             print(f"source_reason: {response.retrieval_reason}")
         if response.retrieval_errors:

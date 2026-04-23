@@ -11,19 +11,6 @@ from app.services.prompt_templates import (
 )
 
 
-CONTEXT_REFERENCE_TRIGGERS = (
-    "tell me more",
-    "expand on",
-    "the first one",
-    "the second one",
-    "the third one",
-    "that project",
-    "that role",
-    "that company",
-    "that skill",
-)
-
-
 class OpenAIAssistantClient:
     def __init__(self, settings: Settings) -> None:
         if not settings.openai_api_key:
@@ -37,7 +24,7 @@ class OpenAIAssistantClient:
         )
 
     async def resolve_context(self, query: str, history: list[ConversationTurnState]) -> str:
-        if not history or not _contains_context_trigger(query):
+        if not history:
             return query
 
         recent_history = history[-self._settings.context_history_window :]
@@ -90,8 +77,3 @@ class OpenAIAssistantClient:
             f"I can help with questions about {assistant_subject}'s portfolio, projects, "
             "experience, skills, or contact details."
         )
-
-
-def _contains_context_trigger(query: str) -> bool:
-    normalized_query = query.lower()
-    return any(trigger in normalized_query for trigger in CONTEXT_REFERENCE_TRIGGERS)

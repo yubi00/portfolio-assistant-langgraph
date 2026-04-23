@@ -176,6 +176,22 @@ Trade-off: `TypedDict` does not validate data at runtime. We accept this for Pha
 
 ---
 
+## Context Resolution
+
+`resolve_context` performs history-aware query contextualization. When prior conversation turns are present, it asks the LLM to rewrite the latest user message into a standalone portfolio question using a bounded recent-history window. If the latest message is already standalone, the prompt instructs the model to return it unchanged.
+
+This follows the same design used by conversational RAG systems: rewrite the user question before classification and retrieval, instead of passing ambiguous follow-ups like "this project" or "the second one" directly into retrieval planning.
+
+Decision: run contextualization whenever conversation history exists, instead of maintaining a hardcoded list of reference trigger phrases.
+
+Problem solved: follow-up handling is not limited to phrases we anticipated in code.
+
+The default history window is 4 turns. This is wide enough for references like "the second project mentioned above" after a short side discussion, while still bounding prompt size.
+
+Trade-off: every follow-up with history incurs one extra LLM call, and a wider history window sends more tokens. If latency or cost becomes an issue, this can be optimized with a cheaper model, caching, or a combined context-resolution/classification step.
+
+---
+
 ## Module Boundaries
 
 ```text
@@ -302,7 +318,19 @@ Trade-off: relevant queries now make an additional LLM call. This may be optimiz
 
 ---
 
-### 9. Keep Retrieval Failures Non-Fatal
+### 9. Use History-Aware Context Resolution
+
+Problem: follow-up questions can reference prior answers in many ways, such as "this project", "it", "the second one", or implied subjects. A hardcoded trigger list is brittle and grows without a clear boundary.
+
+Decision: if conversation history exists, `resolve_context` asks the LLM to rewrite the latest user message into a standalone question, returning it unchanged when no rewrite is needed.
+
+Problem solved: contextual references are resolved semantically instead of by phrase matching.
+
+Trade-off: follow-up turns make an extra LLM call. This is acceptable for correctness during the current phase; later optimization can use a cheaper model, cache, or combined classification/contextualization.
+
+---
+
+### 10. Keep Retrieval Failures Non-Fatal
 
 Problem: one missing source, such as a missing resume file, should not fail the entire assistant response if other context is available.
 
@@ -314,7 +342,7 @@ Trade-off: answer quality depends on what was retrieved. The CLI/API debug field
 
 ---
 
-### 10. Use Tests for Graph Route Behavior
+### 11. Use Tests for Graph Route Behavior
 
 Problem: LLM behavior can drift, but graph topology and route handling should remain deterministic.
 
@@ -326,7 +354,7 @@ Trade-off: fake-service tests do not prove prompt quality. We supplement with ma
 
 ---
 
-### 11. Add Graph Execution Logging
+### 12. Add Graph Execution Logging
 
 Problem: `node_trace` shows the final path, but it does not show duration, intermediate updates, or where a run is currently spending time.
 

@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     docs_path: str | None = Field(default=None, validation_alias="DOCS_PATH")
     merged_context_max_chars: int = Field(default=12000, validation_alias="MERGED_CONTEXT_MAX_CHARS")
 
-    context_history_window: int = Field(default=2, validation_alias="CONTEXT_HISTORY_WINDOW")
+    context_history_window: int = Field(default=4, validation_alias="CONTEXT_HISTORY_WINDOW")
 
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
     log_color: bool = Field(default=True, validation_alias="LOG_COLOR")

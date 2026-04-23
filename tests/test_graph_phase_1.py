@@ -6,7 +6,12 @@ from app.services.retrieval import RetrievalResult
 
 class FakeAssistantService:
     async def resolve_context(self, query, history):
-        return query.replace("the first one", "the first project") if history else query
+        if not history:
+            return query
+        return (
+            query.replace("the first one", "the first project")
+            .replace("this project", "the matchcast project")
+        )
 
     async def classify_relevance(self, query, assistant_subject):
         normalized_query = query.lower()
@@ -88,6 +93,28 @@ async def test_relevant_query_routes_to_generate_answer():
         "merge_normalize_context",
         "generate_answer",
     ]
+
+
+async def test_context_resolution_handles_this_project_follow_up():
+    graph = build_portfolio_graph(FakeAssistantService(), FakeRetrievalService())
+
+    result = await graph.ainvoke(
+        {
+            "user_query": "How did you deploy this project?",
+            "messages": [
+                {
+                    "user": "Tell me about matchcast",
+                    "assistant": "matchcast is an AI-powered audio match analysis project.",
+                }
+            ],
+            "assistant_subject": "Alex",
+        }
+    )
+
+    assert result["rewritten_query"] == "How did you deploy the matchcast project?"
+    assert result["route"] == "portfolio_query"
+    assert result["retrieval_sources"] == ["projects"]
+    assert result["final_answer"] == "Grounded answer for Alex: How did you deploy the matchcast project?"
 
 
 async def test_irrelevant_query_routes_to_friendly_response():
