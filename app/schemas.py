@@ -19,6 +19,7 @@ class PromptRequest(BaseModel):
 class PromptResponse(BaseModel):
     answer: str
     session_id: str | None = None
+    history: list[ConversationTurn] = Field(default_factory=list)
     is_relevant: bool
     intent: str | None = None
     route: str | None = None

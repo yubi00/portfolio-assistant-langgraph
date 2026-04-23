@@ -26,7 +26,7 @@ async def prompt(
             }
         )
         response = await run_prompt(effective_request, settings)
-        session_store.append_turn(session_id, user=request.prompt, assistant=response.answer)
+        session_store.set_history(session_id, [turn.model_dump() for turn in response.history])
         return response
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

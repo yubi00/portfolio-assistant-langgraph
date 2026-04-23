@@ -129,21 +129,21 @@ Status: partially complete. Phase 1 grounding exists; retrieval-grounded answer 
 - MUST [x] Messages accepted in state
 - MUST [x] Interactive CLI keeps in-process conversation history for one running session
 - MUST [x] Context resolver uses a bounded 4-turn history window for multi-turn references
-- MUST [ ] Define API session contract (`session_id`, create/reuse semantics, request/response shape)
-- MUST [ ] Persist and load conversation history by `session_id` for API requests
-- MUST [ ] `save_memory` node
-- MUST [ ] History trimming
-- MUST [ ] Wire stored history into graph invocation before `resolve_context`
+- MUST [x] Define API session contract (`session_id`, create/reuse semantics, request/response shape)
+- MUST [x] Persist and load conversation history by `session_id` for API requests
+- MUST [x] `save_memory` node
+- MUST [x] History trimming
+- MUST [x] Wire stored history into graph invocation before `resolve_context`
 - SHOULD [x] Context-aware responses from provided session history
-- SHOULD [ ] API `session_id` support for stored session history
-- SHOULD [ ] Start with a simple app-level session store before introducing heavier memory infrastructure
+- SHOULD [x] API `session_id` support for stored session history
+- SHOULD [x] Start with a simple app-level session store before introducing heavier memory infrastructure
 - SHOULD [ ] LangGraph checkpointer evaluation for persisted thread memory
 - SHOULD [ ] Decide when to adopt LangGraph checkpointers after the session contract is stable
 - NICE [ ] Advanced memory strategies
 
-Status: partially complete. State accepts history for context resolution and the CLI keeps in-process history, but persisted API session memory, session contracts, and save/load lifecycle are not implemented.
+Status: Phase 6A is complete for app-level memory. The graph now owns `save_memory`, the API supports `session_id`, and the app persists bounded session history in-process. LangGraph checkpointer evaluation and more advanced memory strategies remain.
 
-Current contract decision for implementation:
+Current implemented contract:
 - request: optional `session_id`
 - response: always include `session_id`
 - omitted `session_id` means create a new session

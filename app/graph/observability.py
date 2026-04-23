@@ -28,6 +28,7 @@ NODE_LABELS = {
     NodeName.GENERATE_ANSWER: "07 answer",
     NodeName.ASSISTANT_INTRO: "07 intro",
     NodeName.FRIENDLY_RESPONSE: "07 redirect",
+    NodeName.SAVE_MEMORY: "08 memory",
 }
 
 RETRIEVAL_NODE_SOURCES = {

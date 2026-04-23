@@ -164,6 +164,21 @@ class PortfolioGraphNodes:
             "node_trace": [NodeName.FRIENDLY_RESPONSE],
         }
 
+    @log_node(NodeName.SAVE_MEMORY)
+    async def save_memory(self, state: PortfolioState) -> dict:
+        existing_history = list(state.get("messages", []))
+        final_answer = state.get("final_answer", "").strip()
+        user_query = state.get("user_query", "").strip()
+        if final_answer and user_query:
+            existing_history.append({"user": user_query, "assistant": final_answer})
+        if len(existing_history) > self._settings.session_history_max_turns:
+            existing_history = existing_history[-self._settings.session_history_max_turns :]
+
+        return {
+            "messages": existing_history,
+            "node_trace": [NodeName.SAVE_MEMORY],
+        }
+
 
 def _source_was_planned(state: PortfolioState, source: RetrievalSource) -> bool:
     return source.value in state.get("retrieval_sources", [])

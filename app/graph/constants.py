@@ -14,6 +14,7 @@ class NodeName(StrEnum):
     ASSISTANT_INTRO = "assistant_intro"
     GENERATE_ANSWER = "generate_answer"
     FRIENDLY_RESPONSE = "friendly_response"
+    SAVE_MEMORY = "save_memory"
 
 
 class RouteName(StrEnum):

@@ -45,6 +45,10 @@ class InMemorySessionStore:
         if len(session.history) > self._max_history_turns:
             session.history = session.history[-self._max_history_turns :]
 
+    def set_history(self, session_id: str, history: list[ConversationTurnState]) -> None:
+        session = self._get_session(session_id)
+        session.history = list(history)[-self._max_history_turns :]
+
     def _get_session(self, session_id: str) -> SessionRecord:
         self._evict_expired_sessions()
         session = self._sessions.get(session_id)

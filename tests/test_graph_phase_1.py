@@ -84,6 +84,10 @@ async def test_relevant_query_routes_to_generate_answer():
     assert result["merged_context"] == "[projects]\nProject data"
     assert result["rewritten_query"] == "Tell me about the first project"
     assert result["final_answer"] == "Grounded answer for Alex: Tell me about the first project"
+    assert result["messages"] == [
+        {"user": "List projects", "assistant": "1. Example project"},
+        {"user": "Tell me about the first one", "assistant": "Grounded answer for Alex: Tell me about the first project"},
+    ]
     assert result["node_trace"] == [
         "ingest_user_message",
         "resolve_context",
@@ -92,6 +96,7 @@ async def test_relevant_query_routes_to_generate_answer():
         "retrieve_projects",
         "merge_normalize_context",
         "generate_answer",
+        "save_memory",
     ]
 
 
@@ -115,6 +120,10 @@ async def test_context_resolution_handles_this_project_follow_up():
     assert result["route"] == "portfolio_query"
     assert result["retrieval_sources"] == ["projects"]
     assert result["final_answer"] == "Grounded answer for Alex: How did you deploy the matchcast project?"
+    assert result["messages"][-1] == {
+        "user": "How did you deploy this project?",
+        "assistant": "Grounded answer for Alex: How did you deploy the matchcast project?",
+    }
 
 
 async def test_irrelevant_query_routes_to_friendly_response():
@@ -138,6 +147,7 @@ async def test_irrelevant_query_routes_to_friendly_response():
         "resolve_context",
         "classify_relevance",
         "friendly_response",
+        "save_memory",
     ]
 
 
@@ -162,6 +172,7 @@ async def test_assistant_identity_routes_to_intro_response():
         "resolve_context",
         "classify_relevance",
         "assistant_intro",
+        "save_memory",
     ]
 
 
@@ -186,6 +197,7 @@ async def test_user_project_help_routes_to_friendly_response():
         "resolve_context",
         "classify_relevance",
         "friendly_response",
+        "save_memory",
     ]
 
 
@@ -215,4 +227,4 @@ async def test_skill_query_can_plan_multiple_sources():
     assert "retrieve_resume" in result["node_trace"]
     assert "retrieve_profile" not in result["node_trace"]
     assert "retrieve_docs" not in result["node_trace"]
-    assert result["node_trace"][-2:] == ["merge_normalize_context", "generate_answer"]
+    assert result["node_trace"][-3:] == ["merge_normalize_context", "generate_answer", "save_memory"]

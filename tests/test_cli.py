@@ -30,6 +30,7 @@ def test_main_runs_one_shot_prompt(monkeypatch, capsys):
         response = PromptResponse(
             answer=f"answer: {prompt}",
             session_id=None,
+            history=[],
             is_relevant=True,
             intent="projects",
             route="portfolio_query",

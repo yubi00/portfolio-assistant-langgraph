@@ -109,7 +109,7 @@ async def run_interactive(
         )
         response = await run_prompt(request, get_settings())
         _print_response(response, show_trace)
-        history.append(ConversationTurn(user=prompt, assistant=response.answer))
+        history = response.history
 
 
 def main(argv: Sequence[str] | None = None) -> int:

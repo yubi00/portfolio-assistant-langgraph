@@ -37,6 +37,7 @@ def build_portfolio_graph(
     builder.add_node(NodeName.ASSISTANT_INTRO, nodes.assistant_intro)
     builder.add_node(NodeName.GENERATE_ANSWER, nodes.generate_answer)
     builder.add_node(NodeName.FRIENDLY_RESPONSE, nodes.friendly_response)
+    builder.add_node(NodeName.SAVE_MEMORY, nodes.save_memory)
 
     builder.add_edge(START, NodeName.INGEST_USER_MESSAGE)
     builder.add_edge(NodeName.INGEST_USER_MESSAGE, NodeName.RESOLVE_CONTEXT)
@@ -56,9 +57,10 @@ def build_portfolio_graph(
     builder.add_edge(NodeName.RETRIEVE_RESUME, NodeName.MERGE_NORMALIZE_CONTEXT)
     builder.add_edge(NodeName.RETRIEVE_DOCS, NodeName.MERGE_NORMALIZE_CONTEXT)
     builder.add_edge(NodeName.MERGE_NORMALIZE_CONTEXT, NodeName.GENERATE_ANSWER)
-    builder.add_edge(NodeName.ASSISTANT_INTRO, END)
-    builder.add_edge(NodeName.GENERATE_ANSWER, END)
-    builder.add_edge(NodeName.FRIENDLY_RESPONSE, END)
+    builder.add_edge(NodeName.ASSISTANT_INTRO, NodeName.SAVE_MEMORY)
+    builder.add_edge(NodeName.GENERATE_ANSWER, NodeName.SAVE_MEMORY)
+    builder.add_edge(NodeName.FRIENDLY_RESPONSE, NodeName.SAVE_MEMORY)
+    builder.add_edge(NodeName.SAVE_MEMORY, END)
 
     return builder.compile(name="portfolio_assistant")
 

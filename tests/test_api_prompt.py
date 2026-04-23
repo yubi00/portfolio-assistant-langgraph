@@ -13,6 +13,10 @@ def test_prompt_route_creates_session_and_reuses_history(monkeypatch):
         return PromptResponse(
             answer=f"answer: {request.prompt}",
             session_id=request.session_id,
+            history=[
+                *request.history,
+                {"user": request.prompt, "assistant": f"answer: {request.prompt}"},
+            ],
             is_relevant=True,
             intent="projects",
             route="portfolio_query",
@@ -57,6 +61,7 @@ def test_prompt_route_returns_404_for_unknown_session(monkeypatch):
         return PromptResponse(
             answer="answer",
             session_id=request.session_id,
+            history=[],
             is_relevant=True,
             intent="projects",
             route="portfolio_query",

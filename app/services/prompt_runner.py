@@ -24,6 +24,7 @@ async def run_prompt(request: PromptRequest, settings: Settings) -> PromptRespon
     return PromptResponse(
         answer=result.get("final_answer", ""),
         session_id=request.session_id,
+        history=result.get("messages", []),
         is_relevant=bool(result.get("is_relevant", False)),
         intent=result.get("intent"),
         route=result.get("route"),

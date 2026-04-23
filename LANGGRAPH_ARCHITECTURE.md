@@ -14,12 +14,13 @@ Implemented phases:
 - Phase 1: minimal LangGraph graph with context resolution, relevance classification, explicit routing, answer generation, assistant intro, and friendly redirect
 - Phase 2: retrieval planning with explicit source categories and debug-visible planned sources
 - Phase 3A: retrieval nodes, GitHub project retrieval, local resume/docs retrieval, and context merging
+- Phase 6A: API session contract, app-level session store, and explicit `save_memory` graph step
 
 Not implemented yet:
 
 - PDF/DOCX resume ingestion
 - vector/RAG-backed resume retrieval
-- session memory/checkpointing
+- LangGraph checkpointer-backed memory
 - streaming
 - observability and reliability layers
 
@@ -34,6 +35,7 @@ flowchart LR
     API["FastAPI\nPOST /prompt"]
     Runner["Prompt Runner\ntransport-independent"]
     Graph["LangGraph StateGraph"]
+    Sessions["InMemorySessionStore\nsession_id -> history"]
     OpenAI["OpenAI via\nlangchain-openai"]
     Config["Settings\n.env"]
 
@@ -42,6 +44,8 @@ flowchart LR
     CLI --> Runner
     API --> Runner
     Runner --> Graph
+    API --> Sessions
+    Sessions --> API
     Graph --> OpenAI
     Config --> CLI
     Config --> API
@@ -74,9 +78,10 @@ flowchart TD
     Resume --> Merge
     Docs --> Merge
     Merge --> Answer[generate_answer]
-    Answer --> END([END])
-    Intro --> END
-    Friendly --> END
+    Answer --> Save[save_memory]
+    Intro --> Save
+    Friendly --> Save
+    Save --> END([END])
 ```
 
 ### Route Categories
@@ -155,6 +160,7 @@ Current keys:
 - `messages`: optional prior conversation turns
 - `assistant_subject`: configurable portfolio subject, such as `Yubi`
 - `portfolio_context`: optional ad-hoc per-request context for manual testing
+- `session_id`: optional transport-level session identifier
 - `resume_path`: optional per-request resume text/Markdown path
 - `is_relevant`: compatibility boolean for answer-generation relevance
 - `intent`: short classifier label, such as `projects`, `professional_fit`, `assistant_identity`, or `user_task`
@@ -189,6 +195,28 @@ Problem solved: follow-up handling is not limited to phrases we anticipated in c
 The default history window is 4 turns. This is wide enough for references like "the second project mentioned above" after a short side discussion, while still bounding prompt size.
 
 Trade-off: every follow-up with history incurs one extra LLM call, and a wider history window sends more tokens. If latency or cost becomes an issue, this can be optimized with a cheaper model, caching, or a combined context-resolution/classification step.
+
+---
+
+## Session Memory
+
+Phase 6A introduces an application-level session store for the API and an explicit `save_memory` node in the graph.
+
+Current behavior:
+
+- CLI keeps one in-process conversation history while the process is running
+- API accepts an optional `session_id`
+- if `session_id` is omitted, `/prompt` creates a new session
+- if `session_id` is present and active, `/prompt` loads stored history and passes it into the graph
+- the graph appends the current turn in `save_memory`
+- the API persists the graph-returned history back into the session store
+- if `session_id` is missing or expired, `/prompt` returns a `404` session error
+
+Decision: keep the first persisted-memory implementation outside LangGraph checkpointers and use a simple app-level store with TTL and bounded turn history.
+
+Problem solved: follow-up questions can now work across API requests, not just inside one running CLI process.
+
+Trade-off: this store is process-local and non-durable. Sessions are lost on restart and do not scale across multiple app instances. This is acceptable for the current learning phase; LangGraph checkpointers or an external store remain the next upgrade path.
 
 ---
 
@@ -366,6 +394,18 @@ Trade-off: console logs are less queryable than structured JSON traces. Later ob
 
 ---
 
+### 13. Add App-Level Session Memory Before Checkpointers
+
+Problem: follow-up handling should work across API requests, but introducing LangGraph checkpointers immediately would add another abstraction before the API memory contract and lifecycle behavior are stable.
+
+Decision: first implement a simple app-level `session_id` contract with an in-memory session store, TTL eviction, bounded history, and an explicit `save_memory` graph step.
+
+Problem solved: API clients can continue the same conversation across requests while memory ownership becomes clearer inside the graph.
+
+Trade-off: the first persisted-memory implementation is local to one process and not durable. This is intentionally temporary and gives us a stable baseline to compare against LangGraph-native memory later.
+
+---
+
 ## Current Runtime Examples
 
 Assistant identity:
@@ -377,7 +417,7 @@ uv run portfolio-assistant "who are you" --show-trace
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> classify_relevance -> assistant_intro
+ingest_user_message -> resolve_context -> classify_relevance -> assistant_intro -> save_memory
 ```
 
 User-task redirect:
@@ -389,7 +429,7 @@ uv run portfolio-assistant "can you help me fix bug in one of my typescript proj
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> classify_relevance -> friendly_response
+ingest_user_message -> resolve_context -> classify_relevance -> friendly_response -> save_memory
 ```
 
 Portfolio-fit answer:
@@ -401,7 +441,7 @@ uv run portfolio-assistant "can Yubi help with TypeScript backend systems?" --su
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> classify_relevance -> plan_retrieval -> retrieve_projects -> retrieve_resume -> merge_normalize_context -> generate_answer
+ingest_user_message -> resolve_context -> classify_relevance -> plan_retrieval -> retrieve_projects -> retrieve_resume -> merge_normalize_context -> generate_answer -> save_memory
 ```
 
 ---
@@ -418,23 +458,23 @@ This document should be updated whenever a phase changes system behavior. Expect
 
 ---
 
-## Planned Phase 6 Session Contract
+## Phase 6 Session Contract
 
-The Phase 6 API memory contract will use an application-level `session_id`.
+The Phase 6 API memory contract uses an application-level `session_id`.
 
-Planned request shape:
+Current request shape:
 
 - `POST /prompt`
 - body includes optional `session_id`
 
-Planned behavior:
+Current behavior:
 
 - if `session_id` is omitted, the API creates a new session and returns its id
 - if `session_id` is present and active, the API reuses stored history for that session
-- if `session_id` is present but missing or expired, the API should return a client-visible session error rather than silently creating a different conversation
+- if `session_id` is present but missing or expired, the API returns a client-visible `404` session error rather than silently creating a different conversation
 
-Planned response shape:
+Current response shape:
 
 - `session_id` is always returned so clients can continue the same conversation explicitly
 
-The first implementation will use a simple app-level session store. LangGraph checkpointers will be evaluated after the request/response contract and lifecycle behavior are stable.
+The current implementation uses a simple app-level session store. LangGraph checkpointers will be evaluated after the request/response contract and lifecycle behavior are stable.
