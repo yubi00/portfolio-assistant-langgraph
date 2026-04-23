@@ -2,9 +2,7 @@ import argparse
 import asyncio
 from collections.abc import Sequence
 
-from pydantic import ValidationError
-
-from app.config import get_settings
+from app.config import SettingsError, require_settings
 from app.logging_config import configure_logging
 from app.schemas import ConversationTurn, PromptRequest, PromptResponse
 from app.services.prompt_runner import run_prompt
@@ -116,7 +114,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     prompt = " ".join(args.prompt).strip()
-    settings = get_settings()
+    try:
+        settings = require_settings()
+    except SettingsError as exc:
+        parser.exit(EXIT_ERROR, f"error: {exc}\n")
     configure_logging(
         args.log_level or settings.log_level,
         use_color=settings.log_color and not args.no_log_color,
@@ -131,7 +132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         print(SESSION_END_MESSAGE)
         return EXIT_SUCCESS if not prompt else EXIT_KEYBOARD_INTERRUPT
-    except (ValidationError, ValueError) as exc:
+    except ValueError as exc:
         parser.exit(EXIT_ERROR, f"error: {exc}\n")
     except Exception as exc:
         parser.exit(EXIT_ERROR, f"error: prompt processing failed: {exc}\n")

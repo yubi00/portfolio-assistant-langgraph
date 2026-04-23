@@ -10,7 +10,7 @@ This implementation's architecture and decision log live in `LANGGRAPH_ARCHITECT
 - `uv` project setup
 - LangGraph `StateGraph`
 - Nodes for ingest, context resolution, relevance classification, retrieval planning, retrieval, context merge, answer generation, and friendly off-topic responses
-- Conditional routing for portfolio, identity, and off-topic prompts
+- Conditional routing for portfolio and off-topic prompts
 - Real OpenAI calls through `langchain-openai`
 - File-backed system prompts under `app/prompts/`
 
@@ -18,8 +18,7 @@ This implementation's architecture and decision log live in `LANGGRAPH_ARCHITECT
 
 The graph uses explicit route categories rather than a loose yes/no classifier:
 
-- `portfolio_query`: questions about the subject's projects, resume, work history, skills, contact details, or professional fit
-- `assistant_identity`: questions like "who are you?" or "what can you do?"
+- `portfolio_query`: questions about the subject's projects, resume, work history, skills, contact details, self-introduction, or professional fit
 - `off_topic`: general knowledge, coding/debugging help, or requests to work on the user's own project
 
 This mirrors the production assistant boundary: it may discuss whether the portfolio subject has relevant experience, but it should not become a general coding assistant.
@@ -28,7 +27,6 @@ This mirrors the production assistant boundary: it may discuss whether the portf
 
 Portfolio queries now pass through a planning node before answer generation. The node selects the smallest useful source set from:
 
-- `profile`
 - `projects`
 - `resume`
 - `docs`
@@ -49,7 +47,12 @@ uv sync --dev
 Copy-Item .env.example .env
 ```
 
-Fill in `OPENAI_API_KEY` in `.env`. Optional: set `ASSISTANT_SUBJECT`, `GITHUB_OWNER`, and `GITHUB_TOKEN`.
+Fill in `OPENAI_API_KEY`, `ASSISTANT_SUBJECT`, and optionally `GITHUB_OWNER` / `GITHUB_TOKEN` in `.env`.
+
+For resume-backed answers, add your resume as either:
+
+- `data/resume.md`
+- `data/resume.pdf`
 
 ## Run
 
@@ -89,9 +92,9 @@ Use `--subject` to override the configured portfolio subject for a single run:
 uv run portfolio-assistant "What projects has Yubi built?" --subject "Yubi"
 ```
 
-Use `--context` only for temporary ad-hoc facts during manual testing. Prefer `--resume-path` for profile, skills, and work experience data.
+Use `--context` only for temporary ad-hoc facts during manual testing. For normal usage, place your resume at `data/resume.md` or `data/resume.pdf` and let the app load it automatically.
 
-Use `--resume-path` when testing resume/work-experience questions without editing `.env`:
+Use `--resume-path` only when you want to override the default resume source for a single CLI run:
 
 ```powershell
 uv run portfolio-assistant "what is Yubi's work experience?" `
@@ -120,4 +123,4 @@ Use `--log-level DEBUG` for more verbose local runs, or `--log-level WARNING` wh
 
 ## Current Limitation
 
-Resume PDF/DOCX ingestion is still manual: convert PDF to Markdown first, then pass the processed file with `--resume-path`. Vector/RAG retrieval is intentionally deferred.
+Resume PDF loading is supported from `data/resume.pdf`, but richer PDF/DOCX ingestion and RAG are intentionally deferred.

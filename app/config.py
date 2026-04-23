@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,8 +13,7 @@ class Settings(BaseSettings):
     openai_model_default: str = Field(default="gpt-4.1-mini", validation_alias="OPENAI_MODEL_DEFAULT")
     openai_temperature: float = Field(default=0.2, validation_alias="OPENAI_TEMPERATURE")
 
-    assistant_subject: str = Field(default="the portfolio owner", validation_alias="ASSISTANT_SUBJECT")
-    assistant_display_name: str = Field(default="Portfolio Assistant", validation_alias="ASSISTANT_DISPLAY_NAME")
+    assistant_subject: str = Field(validation_alias="ASSISTANT_SUBJECT")
 
     github_token: str | None = Field(default=None, validation_alias="GITHUB_TOKEN")
     github_owner: str | None = Field(default=None, validation_alias="GITHUB_OWNER")
@@ -36,3 +35,37 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+class SettingsError(RuntimeError):
+    """Raised when application settings are invalid."""
+
+
+def require_settings() -> Settings:
+    try:
+        return get_settings()
+    except ValidationError as exc:
+        raise SettingsError(_format_settings_error(exc)) from None
+
+
+def _format_settings_error(exc: ValidationError) -> str:
+    missing_variables: list[str] = []
+    invalid_variables: list[str] = []
+
+    for error in exc.errors():
+        location = error.get("loc", ())
+        field_name = str(location[0]) if location else "unknown"
+        env_name = field_name.upper()
+        if error.get("type") == "missing":
+            missing_variables.append(env_name)
+            continue
+        invalid_variables.append(f"{env_name}: {error.get('msg', 'invalid value')}")
+
+    message_parts = ["Invalid application configuration."]
+    if missing_variables:
+        missing_list = ", ".join(sorted(set(missing_variables)))
+        message_parts.append(f"Missing required environment variable(s): {missing_list}.")
+    if invalid_variables:
+        message_parts.append("Invalid setting value(s): " + "; ".join(invalid_variables) + ".")
+    message_parts.append("Update .env and restart the application.")
+    return " ".join(message_parts)

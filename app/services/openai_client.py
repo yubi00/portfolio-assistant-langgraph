@@ -61,12 +61,6 @@ class OpenAIAssistantClient:
         )
         return response.text.strip()
 
-    def build_assistant_intro(self, assistant_subject: str) -> str:
-        return (
-            f"I'm {assistant_subject}'s portfolio assistant. I can answer questions about "
-            "their projects, experience, skills, background, and professional fit using the portfolio data available to me."
-        )
-
     def build_friendly_response(self, assistant_subject: str, intent: str | None = None) -> str:
         if intent == "user_task":
             return (

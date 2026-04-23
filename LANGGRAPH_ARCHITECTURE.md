@@ -11,7 +11,7 @@ The goal is to provide production-grade boundaries: clear orchestration, explici
 Implemented phases:
 
 - Phase 0: uv project, FastAPI app, CLI, env template, tests
-- Phase 1: minimal LangGraph graph with context resolution, relevance classification, explicit routing, answer generation, assistant intro, and friendly redirect
+- Phase 1: minimal LangGraph graph with context resolution, relevance classification, explicit routing, answer generation, and friendly redirect
 - Phase 2: retrieval planning with explicit source categories and debug-visible planned sources
 - Phase 3A: retrieval nodes, GitHub project retrieval, local resume/docs retrieval, and context merging
 - Phase 6A: API session contract, app-level session store, and explicit `save_memory` graph step
@@ -66,20 +66,16 @@ flowchart TD
     Resolve --> Classify[classify_relevance]
 
     Classify -->|portfolio_query| Plan[plan_retrieval]
-    Classify -->|assistant_identity| Intro[assistant_intro]
     Classify -->|off_topic| Friendly[friendly_response]
 
-    Plan -. selected .-> Profile[retrieve_profile]
     Plan -. selected .-> Projects[retrieve_projects]
     Plan -. selected .-> Resume[retrieve_resume]
     Plan -. selected .-> Docs[retrieve_docs]
-    Profile --> Merge[merge_normalize_context]
     Projects --> Merge
     Resume --> Merge
     Docs --> Merge
     Merge --> Answer[generate_answer]
     Answer --> Save[save_memory]
-    Intro --> Save
     Friendly --> Save
     Save --> END([END])
 ```
@@ -88,11 +84,10 @@ flowchart TD
 
 | Route | Meaning | Destination |
 |---|---|---|
-| `portfolio_query` | The user asks about the subject's projects, resume, work history, skills, contact details, or professional fit. | `plan_retrieval` |
-| `assistant_identity` | The user asks who the assistant is or what it can do. | `assistant_intro` |
+| `portfolio_query` | The user asks about the subject's projects, resume, work history, skills, contact details, self-introduction, or professional fit. | `plan_retrieval` |
 | `off_topic` | The user asks for general knowledge, coding/debugging help, or work on their own project. | `friendly_response` |
 
-This route split exists because a boolean `is_relevant` flag was too coarse. For example, "who are you?" is not a portfolio data question, but it also should not receive the same response as "what is the weather?"
+This route split exists because a boolean `is_relevant` flag was too coarse. Portfolio identity questions such as "who are you?" now flow through the normal portfolio retrieval path, while only genuinely unrelated prompts go to `off_topic`.
 
 ### Retrieval Sources
 
@@ -100,7 +95,6 @@ Phase 2 added source planning. Phase 3A adds source retrieval and context mergin
 
 | Source | Meaning |
 |---|---|
-| `profile` | Identity, contact details, preferred summary, location, and links |
 | `projects` | GitHub or portfolio projects, READMEs, stacks, outcomes, and links |
 | `resume` | Resume facts, employment timeline, companies, responsibilities, education, certifications, skills, achievements, and role summaries |
 | `docs` | Long-form documents, case studies, blog posts, notes, or custom knowledge |
@@ -117,7 +111,6 @@ The first retrieval implementation uses:
 
 - GitHub REST API for `projects`; forks are excluded by default for "built projects" accuracy
 - local text/markdown files for `resume` and `docs`
-- resume-derived profile context for `profile`
 
 The graph dispatches only planned retrieval sources with LangGraph dynamic sends. Independent retrieval nodes can run concurrently, then join at `merge_normalize_context`.
 
@@ -138,12 +131,12 @@ Trade-off: excluding forks may hide meaningful fork-based contributions. A futur
 
 Resume strategy:
 
-- Current: load a small resume text or Markdown file directly into context. Work-experience questions use the `resume` source because a normal 1-2 page resume already contains the experience section.
-- Local testing passes the resume source with `--resume-path`.
-- PDF resumes can be converted to Markdown with `scripts/convert_resume_pdf.py`.
+- Current: load a small resume source automatically from `data/resume.md` or `data/resume.pdf`. Work-experience questions use the `resume` source because a normal 1-2 page resume already contains the experience section.
+- CLI still supports `--resume-path` as a one-off override for local testing.
+- PDF resumes can be loaded directly, and the existing `scripts/convert_resume_pdf.py` helper remains available when Markdown inspection is useful.
 - Later: accept PDF/DOCX, normalize into Markdown/JSON during ingestion, then optionally chunk/index for RAG.
 
-Problem solved: a 1-2 page resume usually fits comfortably in context, so RAG is not required for the first useful version.
+Problem solved: local setup no longer requires passing a resume path on every API call, and a 1-2 page resume still fits comfortably in context so RAG is not required for the first useful version.
 
 Trade-off: direct context loading is simpler but less scalable for larger document collections. RAG remains a later upgrade, not a Phase 3 blocker.
 
@@ -160,14 +153,13 @@ Current keys:
 - `messages`: optional prior conversation turns
 - `assistant_subject`: configurable portfolio subject, such as `Yubi`
 - `portfolio_context`: optional ad-hoc per-request context for manual testing
-- `session_id`: optional transport-level session identifier
 - `resume_path`: optional per-request resume text/Markdown path
 - `is_relevant`: compatibility boolean for answer-generation relevance
-- `intent`: short classifier label, such as `projects`, `professional_fit`, `assistant_identity`, or `user_task`
+- `intent`: short classifier label, such as `projects`, `professional_fit`, `profile`, or `user_task`
 - `route`: graph route category
 - `retrieval_sources`: planned source categories for portfolio queries
 - `retrieval_reason`: short explanation of why those sources were selected
-- `profile_context`, `project_context`, `resume_context`, `docs_context`: raw retrieved source context
+- `project_context`, `resume_context`, `docs_context`: raw retrieved source context
 - `merged_context`: normalized context passed to answer generation
 - `retrieval_errors`: non-fatal retrieval errors collected from source nodes
 - `final_answer`: final response text
@@ -280,17 +272,17 @@ Trade-off: one extra transport to maintain. The shared runner keeps the cost low
 
 Problem: the original docs mention Yubi, but a reusable portfolio assistant should work for any subject.
 
-Decision: make `ASSISTANT_SUBJECT`, `GITHUB_OWNER`, and `GITHUB_TOKEN` configuration-driven. Keep local resume files request-driven through `--resume-path` or API request fields.
+Decision: make `ASSISTANT_SUBJECT`, `GITHUB_OWNER`, and `GITHUB_TOKEN` configuration-driven. Load the resume from a standard server-side source by default, while keeping `--resume-path` as a CLI-only local testing override.
 
-Trade-off: generic wording can be less personal until profile data is supplied. Later phases should introduce a profile document containing preferred name, pronouns, summary, resume, and tone preferences.
+Trade-off: generic wording can be less personal until richer portfolio documents are supplied. Later phases can add optional profile metadata, such as preferred name, pronouns, summary, or tone preferences, as a distinct source only if it proves useful.
 
 ---
 
 ### 4. Use Explicit Route Categories Instead of Boolean Relevance Only
 
-Problem: a boolean classifier cannot distinguish "who are you?" from genuine off-topic prompts, and it can let user-task prompts through if they mention technologies in the subject's stack.
+Problem: a boolean classifier cannot distinguish portfolio questions from genuine off-topic prompts, and it can let user-task prompts through if they mention technologies in the subject's stack.
 
-Decision: classify into `portfolio_query`, `assistant_identity`, and `off_topic`, while retaining `is_relevant` as a compatibility flag for answer generation.
+Decision: classify into `portfolio_query` and `off_topic`, while retaining `is_relevant` as a compatibility flag for answer generation.
 
 Problem solved: route behavior is transparent and testable.
 
@@ -324,13 +316,13 @@ Trade-off: file I/O is introduced at prompt load time. Prompts are cached with `
 
 ### 7. Ground Answers in Retrieved Context
 
-Problem: the assistant should not rely on hardcoded profile text or global fallback context.
+Problem: the assistant should not rely on hardcoded identity text or global fallback context.
 
-Decision: `generate_answer` uses `merged_context` built from planned retrieval sources. Resume/profile-style information comes from the resume source, not a hardcoded profile env var. `--context` remains only for ad-hoc manual testing.
+Decision: `generate_answer` uses `merged_context` built from planned retrieval sources. Identity, work-history, and skills information comes from the resume source instead of a special hardcoded intro or separate profile retriever. `--context` remains only for ad-hoc manual testing.
 
-Problem solved: profile, skills, and work-experience answers come from the same user-provided resume source.
+Problem solved: identity, skills, and work-experience answers come from the same user-provided resume source.
 
-Trade-off: CLI/API callers must provide a resume path until a proper upload/ingestion flow exists.
+Trade-off: the assistant currently assumes the resume is the primary identity source. If future requirements need separate profile metadata, that should be introduced as a genuinely distinct source instead of a thin wrapper around the resume.
 
 ---
 
@@ -417,7 +409,7 @@ uv run portfolio-assistant "who are you" --show-trace
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> classify_relevance -> assistant_intro -> save_memory
+ingest_user_message -> resolve_context -> classify_relevance -> plan_retrieval -> retrieve_resume -> merge_normalize_context -> generate_answer -> save_memory
 ```
 
 User-task redirect:

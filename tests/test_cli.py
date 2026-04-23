@@ -1,5 +1,10 @@
 from app import cli
+from app.config import Settings, SettingsError
 from app.schemas import PromptResponse
+
+
+def _test_settings() -> Settings:
+    return Settings(_env_file=None, OPENAI_API_KEY="test", ASSISTANT_SUBJECT="Alex")
 
 
 def test_build_parser_accepts_one_shot_prompt():
@@ -44,6 +49,7 @@ def test_main_runs_one_shot_prompt(monkeypatch, capsys):
         return response
 
     monkeypatch.setattr(cli, "run_once", fake_run_once)
+    monkeypatch.setattr(cli, "require_settings", _test_settings)
 
     exit_code = cli.main(["What", "projects?", "--subject", "Alex", "--show-trace"])
 
@@ -58,6 +64,7 @@ def test_main_runs_one_shot_prompt(monkeypatch, capsys):
 
 def test_interactive_cli_exits_cleanly_on_eof(monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda _: (_ for _ in ()).throw(EOFError))
+    monkeypatch.setattr(cli, "require_settings", _test_settings)
 
     exit_code = cli.main([])
 
@@ -69,6 +76,7 @@ def test_interactive_cli_exits_cleanly_on_eof(monkeypatch, capsys):
 
 def test_interactive_cli_exits_cleanly_on_keyboard_interrupt(monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda _: (_ for _ in ()).throw(KeyboardInterrupt))
+    monkeypatch.setattr(cli, "require_settings", _test_settings)
 
     exit_code = cli.main([])
 
@@ -76,3 +84,15 @@ def test_interactive_cli_exits_cleanly_on_keyboard_interrupt(monkeypatch, capsys
     assert exit_code == cli.EXIT_SUCCESS
     assert "Portfolio assistant CLI." in output
     assert "Ending portfolio assistant session." in output
+
+
+def test_main_exits_cleanly_when_settings_are_invalid(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "require_settings", lambda: (_ for _ in ()).throw(SettingsError("Missing ASSISTANT_SUBJECT")))
+
+    try:
+        cli.main([])
+    except SystemExit as exc:
+        assert exc.code == cli.EXIT_ERROR
+
+    output = capsys.readouterr()
+    assert "error: Missing ASSISTANT_SUBJECT" in output.err

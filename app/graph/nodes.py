@@ -59,16 +59,6 @@ class PortfolioGraphNodes:
             "node_trace": [NodeName.CLASSIFY_RELEVANCE],
         }
 
-    @log_node(NodeName.ASSISTANT_INTRO)
-    async def assistant_intro(self, state: PortfolioState) -> dict:
-        answer = self._assistant_service.build_assistant_intro(
-            assistant_subject=state.get("assistant_subject", "the portfolio owner")
-        )
-        return {
-            "final_answer": answer,
-            "node_trace": [NodeName.ASSISTANT_INTRO],
-        }
-
     @log_node(NodeName.PLAN_RETRIEVAL)
     async def plan_retrieval(self, state: PortfolioState) -> dict:
         plan = await self._assistant_service.plan_retrieval(
@@ -81,18 +71,6 @@ class PortfolioGraphNodes:
             "retrieval_reason": plan.reason,
             "node_trace": [NodeName.PLAN_RETRIEVAL],
         }
-
-    @log_node(NodeName.RETRIEVE_PROFILE)
-    async def retrieve_profile(self, state: PortfolioState) -> dict:
-        if not _source_was_planned(state, RetrievalSource.PROFILE):
-            return skipped_update(NodeName.RETRIEVE_PROFILE, "profile source was not planned")
-
-        result = await self._retrieval_service.retrieve_profile(
-            assistant_subject=state.get("assistant_subject", "the portfolio owner"),
-            path_override=state.get("resume_path"),
-            inline_context=state.get("portfolio_context", ""),
-        )
-        return _result_update(result, "profile_context", NodeName.RETRIEVE_PROFILE)
 
     @log_node(NodeName.RETRIEVE_PROJECTS)
     async def retrieve_projects(self, state: PortfolioState) -> dict:
@@ -122,7 +100,6 @@ class PortfolioGraphNodes:
     async def merge_normalize_context(self, state: PortfolioState) -> dict:
         sections = []
         for label, key in (
-            ("profile", "profile_context"),
             ("projects", "project_context"),
             ("resume", "resume_context"),
             ("docs", "docs_context"),

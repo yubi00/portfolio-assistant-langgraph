@@ -39,8 +39,7 @@ Notes:
 - MUST [x] Conditional routing
 - SHOULD [x] `resolve_context` node
 - SHOULD [x] History-aware query contextualization without brittle trigger phrase matching
-- SHOULD [x] Explicit route categories: `portfolio_query`, `assistant_identity`, `off_topic`
-- SHOULD [x] Dedicated `assistant_intro` node
+- SHOULD [x] Explicit route categories: `portfolio_query`, `off_topic`
 - NICE [x] Friendly response refinement
 - NICE [x] File-backed prompt templates under `app/prompts/`
 - NICE [x] Unit tests for graph route behavior
@@ -52,7 +51,7 @@ Notes:
 - Graph behavior is tested with a fake assistant service, so unit tests do not require API keys.
 - `resolve_context` rewrites follow-up questions when prior messages exist, matching the history-aware retrieval pattern used in conversational RAG.
 - CLI smoke checks confirmed:
-  - `"who are you"` routes to `assistant_intro`
+  - `"who are you"` routes through resume retrieval
   - user debugging requests route to `friendly_response`
   - portfolio-fit questions route to `generate_answer`
 
@@ -61,10 +60,10 @@ Notes:
 ## Phase 2 - Retrieval Planning
 
 - MUST [x] `plan_retrieval` node
-- MUST [x] Define source categories: profile, projects, resume, docs
+- MUST [x] Define source categories: projects, resume, docs
 - MUST [x] Routing logic works for multiple prompt types
 - SHOULD [x] Add richer intent/source planning through structured OpenAI output
-- SHOULD [ ] Define required user/profile inputs: GitHub owner, resume, preferred display name
+- SHOULD [ ] Define required user inputs: GitHub owner, resume, preferred display name
 - NICE [x] Debug output for source selection through CLI/API response fields
 
 Status: complete for planning-only Phase 2.
@@ -84,7 +83,6 @@ Notes:
 - MUST [x] Support multi-source queries
 - SHOULD [x] Service layer separation
 - SHOULD [x] GitHub retrieval uses configured token/owner
-- SHOULD [x] `retrieve_profile` node
 - NICE [ ] Optional web retrieval
 
 Status: complete for first retrieval-node implementation.
@@ -92,7 +90,8 @@ Status: complete for first retrieval-node implementation.
 Notes:
 - `projects` uses GitHub REST API.
 - Work-experience answers use the `resume` source because the resume already contains employment history.
-- CLI supports `--resume-path` for local testing without editing `.env`.
+- The app auto-loads `data/resume.md` or `data/resume.pdf` by default.
+- CLI supports `--resume-path` only as a one-off testing override.
 - PDF-to-Markdown conversion helper exists in `scripts/convert_resume_pdf.py`.
 - Full PDF/DOCX ingestion and RAG are intentionally deferred.
 

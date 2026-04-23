@@ -20,19 +20,16 @@ NODE_LABELS = {
     NodeName.RESOLVE_CONTEXT: "02 context",
     NodeName.CLASSIFY_RELEVANCE: "03 classify",
     NodeName.PLAN_RETRIEVAL: "04 plan",
-    NodeName.RETRIEVE_PROFILE: "05 retrieve:profile",
     NodeName.RETRIEVE_PROJECTS: "05 retrieve:projects",
     NodeName.RETRIEVE_RESUME: "05 retrieve:resume",
     NodeName.RETRIEVE_DOCS: "05 retrieve:docs",
     NodeName.MERGE_NORMALIZE_CONTEXT: "06 merge",
     NodeName.GENERATE_ANSWER: "07 answer",
-    NodeName.ASSISTANT_INTRO: "07 intro",
     NodeName.FRIENDLY_RESPONSE: "07 redirect",
     NodeName.SAVE_MEMORY: "08 memory",
 }
 
 RETRIEVAL_NODE_SOURCES = {
-    NodeName.RETRIEVE_PROFILE: RetrievalSource.PROFILE,
     NodeName.RETRIEVE_PROJECTS: RetrievalSource.PROJECTS,
     NodeName.RETRIEVE_RESUME: RetrievalSource.RESUME,
     NodeName.RETRIEVE_DOCS: RetrievalSource.DOCS,

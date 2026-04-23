@@ -1,11 +1,16 @@
+import logging
 from pathlib import Path
 from typing import Protocol
 
 import httpx
 from pydantic import BaseModel
+from pypdf import PdfReader
 
 from app.config import Settings
 from app.graph.constants import RetrievalSource
+
+
+logger = logging.getLogger("app.services.retrieval")
 
 
 class RetrievalResult(BaseModel):
@@ -15,14 +20,6 @@ class RetrievalResult(BaseModel):
 
 
 class PortfolioRetrievalService(Protocol):
-    async def retrieve_profile(
-        self,
-        assistant_subject: str,
-        path_override: str | None = None,
-        inline_context: str = "",
-    ) -> RetrievalResult:
-        ...
-
     async def retrieve_projects(self) -> RetrievalResult:
         ...
 
@@ -43,24 +40,7 @@ class ConfiguredPortfolioRetrievalService:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-
-    async def retrieve_profile(
-        self,
-        assistant_subject: str,
-        path_override: str | None = None,
-        inline_context: str = "",
-    ) -> RetrievalResult:
-        content_parts = [f"Portfolio subject: {assistant_subject}"]
-        if inline_context.strip():
-            content_parts.append(inline_context.strip())
-
-        resume_result = await self.retrieve_resume(path_override)
-        if resume_result.content:
-            content_parts.append(resume_result.content)
-        elif resume_result.error:
-            return RetrievalResult(source=RetrievalSource.PROFILE, content="\n\n".join(content_parts), error=resume_result.error)
-
-        return RetrievalResult(source=RetrievalSource.PROFILE, content="\n\n".join(content_parts))
+        self._configured_resume_result = _load_default_resume_source()
 
     async def retrieve_projects(self) -> RetrievalResult:
         if not self._settings.github_owner:
@@ -115,7 +95,9 @@ class ConfiguredPortfolioRetrievalService:
         )
 
     async def retrieve_resume(self, path_override: str | None = None) -> RetrievalResult:
-        return _read_text_source(RetrievalSource.RESUME, path_override, "resume path")
+        if path_override:
+            return _read_text_source(RetrievalSource.RESUME, path_override, "resume path override")
+        return self._configured_resume_result
 
     async def retrieve_docs(self, path_override: str | None = None) -> RetrievalResult:
         return _read_text_source(RetrievalSource.DOCS, path_override or self._settings.docs_path, "DOCS_PATH")
@@ -130,9 +112,40 @@ def _read_text_source(source: RetrievalSource, configured_path: str | None, env_
         return RetrievalResult(source=source, error=f"{env_name} points to a missing file: {configured_path}")
 
     try:
+        if path.suffix.lower() == ".pdf":
+            return RetrievalResult(source=source, content=_extract_pdf_text(path))
         return RetrievalResult(source=source, content=path.read_text(encoding="utf-8").strip())
     except OSError as exc:
         return RetrievalResult(source=source, error=f"Could not read {source.value} file: {exc}")
+
+
+def _load_default_resume_source() -> RetrievalResult:
+    for candidate in (Path("data/resume.md"), Path("data/resume.pdf")):
+        if candidate.exists() and candidate.is_file():
+            logger.info("resume preload | source=%s", candidate)
+            result = _read_text_source(RetrievalSource.RESUME, str(candidate), "default resume source")
+            _log_resume_preload_result(str(candidate), result)
+            return result
+
+    result = RetrievalResult(
+        source=RetrievalSource.RESUME,
+        error="No resume source was found. Add data/resume.md or data/resume.pdf.",
+    )
+    _log_resume_preload_result("none", result)
+    return result
+
+
+def _extract_pdf_text(path: Path) -> str:
+    reader = PdfReader(str(path))
+    pages = [page.extract_text() or "" for page in reader.pages]
+    return "\n\n".join(page.strip() for page in pages if page.strip()).strip()
+
+
+def _log_resume_preload_result(source: str, result: RetrievalResult) -> None:
+    if result.content:
+        logger.info("resume preload complete | source=%s | chars=%s", source, len(result.content))
+        return
+    logger.warning("resume preload skipped | source=%s | reason=%s", source, result.error)
 
 
 def _format_repositories(repos: list[dict]) -> str:

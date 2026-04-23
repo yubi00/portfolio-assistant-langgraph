@@ -10,4 +10,6 @@ __pycache__/
 
 # Local/private resume inputs and processed outputs.
 resume.pdf
+data/resume.md
+data/resume.pdf
 data/processed/

@@ -26,7 +26,6 @@ class PortfolioState(TypedDict):
     route: NotRequired[str]
     retrieval_sources: NotRequired[list[str]]
     retrieval_reason: NotRequired[str]
-    profile_context: NotRequired[str]
     project_context: NotRequired[str]
     resume_context: NotRequired[str]
     docs_context: NotRequired[str]

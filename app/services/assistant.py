@@ -9,7 +9,7 @@ from app.graph.state import ConversationTurnState
 class RelevanceDecision(BaseModel):
     route: RouteName = Field(description="Graph route category for the query.")
     is_relevant: bool = Field(description="Whether the user query should use portfolio answer generation.")
-    intent: str = Field(description="Short lowercase intent label, such as projects, resume, skills, assistant_identity, or user_task.")
+    intent: str = Field(description="Short lowercase intent label, such as projects, resume, skills, profile, or user_task.")
 
 
 class RetrievalPlan(BaseModel):
@@ -28,9 +28,6 @@ class AssistantService(Protocol):
         ...
 
     async def generate_answer(self, query: str, assistant_subject: str, portfolio_context: str) -> str:
-        ...
-
-    def build_assistant_intro(self, assistant_subject: str) -> str:
         ...
 
     def build_friendly_response(self, assistant_subject: str, intent: str | None = None) -> str:
