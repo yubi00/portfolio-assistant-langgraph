@@ -20,16 +20,22 @@ def route_after_relevance(state: PortfolioState) -> Literal["portfolio_query", "
 
 
 def _log_route(route: RouteName, state: PortfolioState) -> None:
+    request_fragment = f" | request_id={state['request_id']}" if state.get("request_id") else ""
+    session_fragment = f" | session_id={state['session_id']}" if state.get("session_id") else ""
     logger.info(
-        "=> %-22s | route=%s | intent=%s | relevant=%s",
+        "=> %-22s | route=%s | intent=%s | relevant=%s%s%s",
         "edge classify",
         route.value,
         state.get("intent"),
         state.get("is_relevant"),
+        request_fragment,
+        session_fragment,
     )
 
 
 def route_to_retrievers(state: PortfolioState) -> list[Send]:
+    request_fragment = f" | request_id={state['request_id']}" if state.get("request_id") else ""
+    session_fragment = f" | session_id={state['session_id']}" if state.get("session_id") else ""
     source_to_node = {
         RetrievalSource.PROJECTS.value: NodeName.RETRIEVE_PROJECTS,
         RetrievalSource.RESUME.value: NodeName.RETRIEVE_RESUME,
@@ -45,8 +51,10 @@ def route_to_retrievers(state: PortfolioState) -> list[Send]:
         return [Send(NodeName.MERGE_NORMALIZE_CONTEXT, state)]
 
     logger.info(
-        "=> %-22s | fanout=%s",
+        "=> %-22s | fanout=%s%s%s",
         "edge retrieval",
         ",".join(state.get("retrieval_sources", [])),
+        request_fragment,
+        session_fragment,
     )
     return sends

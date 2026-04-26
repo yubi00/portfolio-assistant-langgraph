@@ -37,7 +37,7 @@ async def prompt(
             session_id,
             _shorten(request.prompt),
         )
-        response = await run_prompt(effective_request, settings)
+        response = await run_prompt(effective_request, settings, request_id=request_id)
         session_store.set_history(session_id, [turn.model_dump() for turn in response.history])
         logger.info(
             "prompt request completed | request_id=%s | session_id=%s | route=%s | intent=%s | duration_ms=%.1f",
@@ -151,7 +151,7 @@ async def _stream_prompt_response(
     answer_chunk_count = 0
     yield _format_sse_event("session_started", {"session_id": session_id})
     try:
-        async for event in run_prompt_stream(request, settings):
+        async for event in run_prompt_stream(request, settings, request_id=request_id):
             if event["type"] == "progress":
                 buffered_chunk = chunk_buffer.flush()
                 if buffered_chunk:

@@ -131,6 +131,13 @@ uv run portfolio-assistant "who are you" --show-trace --log-level INFO
 
 Use `--log-level DEBUG` for more verbose local runs, or `--log-level WARNING` when you only want warnings/errors. Use `--no-log-color` to disable ANSI colors.
 
+For API runs, the logs now correlate transport and graph execution with:
+
+- `request_id`: unique per HTTP request
+- `session_id`: stable across follow-up requests in the same conversation
+
+That means one `/prompt` or `/prompt/stream` call can be followed from the API log line into the graph node logs without external tracing infrastructure.
+
 ## Current Limitation
 
 Resume PDF loading is supported from `data/resume.pdf`, but richer PDF/DOCX ingestion and RAG are intentionally deferred.

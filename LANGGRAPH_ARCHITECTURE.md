@@ -21,8 +21,8 @@ Not implemented yet:
 
 - PDF/DOCX resume ingestion
 - vector/RAG-backed resume retrieval
-- streaming
-- observability and reliability layers
+- structured/external observability layers
+- reliability layers
 
 ---
 
@@ -385,7 +385,7 @@ Trade-off: fake-service tests do not prove prompt quality. We supplement with ma
 
 Problem: `node_trace` shows the final path, but it does not show duration, intermediate updates, or where a run is currently spending time.
 
-Decision: use Python's standard `logging` module with a central formatter, CLI log-level controls, node start/done/error logs, and route decision logs.
+Decision: use Python's standard `logging` module with a central formatter, CLI log-level controls, node start/done/error logs, route decision logs, and API-generated `request_id` / `session_id` correlation carried into graph state.
 
 Problem solved: local runs expose graph execution in real time without adding a new observability vendor.
 
@@ -426,6 +426,18 @@ Decision: keep `POST /prompt` for request/response JSON and add a separate `POST
 Problem solved: streaming stays transport-specific at the API layer while the underlying prompt runner, graph behavior, session handling, and retrieval logic remain shared.
 
 Trade-off: the current streaming implementation exposes stable `progress` milestones for selected node completions and real streamed output for the `generate_answer` node. It lightly buffers tiny token fragments into more natural text chunks and does not stream every internal graph update, which keeps the client contract cleaner but less exhaustive.
+
+---
+
+### 16. Correlate API And Graph Logs
+
+Problem: API lifecycle logs had `request_id` and `session_id`, but graph node logs did not. That made it harder to tie one HTTP request to the exact orchestration path when several requests were active.
+
+Decision: propagate `request_id` and `session_id` into initial graph state and include them in node and routing logs.
+
+Problem solved: one request can now be traced cleanly across transport logs and graph execution logs.
+
+Trade-off: graph state now carries a small amount of transport-derived metadata. This is acceptable because the metadata is observability-only and does not influence orchestration decisions.
 
 ---
 

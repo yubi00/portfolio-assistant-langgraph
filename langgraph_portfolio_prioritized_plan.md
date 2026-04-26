@@ -183,10 +183,11 @@ Status: partially complete. The current streaming cut adds an SSE route with `se
 ## Phase 9 - Observability
 
 - MUST [x] Basic graph node and route logging
-- SHOULD [ ] Node-level tracing
+- SHOULD [x] Request/session correlation across API and graph logs
+- SHOULD [x] Node-level tracing
 - NICE [ ] LangSmith integration
 
-Status: partially complete. Local logging exists; structured logs/tracing remain future work.
+Status: partially complete. Local logging exists with request/session-aware API and graph correlation. Structured JSON logs and external tracing remain future work.
 
 ---
 

@@ -82,6 +82,10 @@ def _state_summary(state: PortfolioState) -> str:
     intent = state.get("intent")
     query = state.get("rewritten_query") or state.get("user_query") or ""
     parts = [f"query={_shorten(query)!r}"]
+    if request_id := state.get("request_id"):
+        parts.append(f"request_id={request_id}")
+    if session_id := state.get("session_id"):
+        parts.append(f"session_id={session_id}")
     if route:
         parts.append(f"route={route}")
     if intent:

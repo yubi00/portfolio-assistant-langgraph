@@ -14,7 +14,7 @@ def _test_settings() -> Settings:
 def test_prompt_route_creates_session_and_reuses_history(monkeypatch):
     calls: list[dict] = []
 
-    async def fake_run_prompt(request, settings):
+    async def fake_run_prompt(request, settings, *, request_id=None):
         calls.append(request.model_dump())
         return PromptResponse(
             answer=f"answer: {request.prompt}",
@@ -65,7 +65,7 @@ def test_prompt_route_creates_session_and_reuses_history(monkeypatch):
 
 
 def test_prompt_route_returns_404_for_unknown_session(monkeypatch):
-    async def fake_run_prompt(request, settings):
+    async def fake_run_prompt(request, settings, *, request_id=None):
         return PromptResponse(
             answer="answer",
             session_id=request.session_id,
@@ -119,7 +119,7 @@ def test_create_app_returns_configuration_error_app_when_settings_are_invalid(mo
 
 
 def test_prompt_stream_route_emits_sse_events(monkeypatch):
-    async def fake_run_prompt_stream(request, settings):
+    async def fake_run_prompt_stream(request, settings, *, request_id=None):
         yield {"type": "progress", "data": {"node": "resolve_context", "step": "context_resolved"}}
         yield {"type": "progress", "data": {"node": "plan_retrieval", "step": "retrieval_planned"}}
         yield {"type": "answer_chunk", "data": "First"}

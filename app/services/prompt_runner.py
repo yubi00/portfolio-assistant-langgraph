@@ -6,7 +6,12 @@ from app.graph.builder import get_portfolio_graph
 from app.schemas import PromptRequest, PromptResponse
 
 
-async def run_prompt(request: PromptRequest, settings: Settings) -> PromptResponse:
+async def run_prompt(
+    request: PromptRequest,
+    settings: Settings,
+    *,
+    request_id: str | None = None,
+) -> PromptResponse:
     """Invoke the portfolio graph from any transport.
 
     FastAPI and the CLI both call this function so request mapping, defaults,
@@ -14,11 +19,16 @@ async def run_prompt(request: PromptRequest, settings: Settings) -> PromptRespon
     """
 
     graph = get_portfolio_graph()
-    result = await graph.ainvoke(build_initial_state(request, settings))
+    result = await graph.ainvoke(build_initial_state(request, settings, request_id=request_id))
     return build_prompt_response(request, result)
 
 
-async def run_prompt_stream(request: PromptRequest, settings: Settings) -> AsyncIterator[dict]:
+async def run_prompt_stream(
+    request: PromptRequest,
+    settings: Settings,
+    *,
+    request_id: str | None = None,
+) -> AsyncIterator[dict]:
     graph = get_portfolio_graph()
     state_updates: dict = {}
     streamed_answer_parts: list[str] = []
@@ -26,7 +36,7 @@ async def run_prompt_stream(request: PromptRequest, settings: Settings) -> Async
     answer_started_emitted = False
 
     async for chunk in graph.astream(
-        build_initial_state(request, settings),
+        build_initial_state(request, settings, request_id=request_id),
         stream_mode=["messages", "updates"],
         version="v2",
     ):
@@ -67,15 +77,24 @@ async def run_prompt_stream(request: PromptRequest, settings: Settings) -> Async
     yield {"type": "answer_completed", "data": response.model_dump()}
 
 
-def build_initial_state(request: PromptRequest, settings: Settings) -> dict:
-    return {
+def build_initial_state(
+    request: PromptRequest,
+    settings: Settings,
+    *,
+    request_id: str | None = None,
+) -> dict:
+    state = {
         "user_query": request.prompt,
         "messages": [turn.model_dump() for turn in request.history],
         "assistant_subject": request.assistant_subject or settings.assistant_subject,
         "portfolio_context": request.portfolio_context or "",
+        "session_id": request.session_id,
         "resume_path": request.resume_path,
         "docs_path": request.docs_path or settings.docs_path,
     }
+    if request_id:
+        state["request_id"] = request_id
+    return state
 
 
 def build_prompt_response(request: PromptRequest, result: dict, answer_override: str | None = None) -> PromptResponse:

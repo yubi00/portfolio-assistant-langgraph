@@ -3,6 +3,7 @@ from app.graph.builder import build_portfolio_graph
 from app.graph.constants import RetrievalSource, RouteName
 from app.services.assistant import RelevanceDecision, RetrievalPlan
 from app.services.retrieval import RetrievalResult
+import logging
 
 
 def _test_settings() -> Settings:
@@ -235,3 +236,22 @@ async def test_skill_query_can_plan_multiple_sources():
     assert "retrieve_resume" in result["node_trace"]
     assert "retrieve_docs" not in result["node_trace"]
     assert result["node_trace"][-3:] == ["merge_normalize_context", "generate_answer", "save_memory"]
+
+
+async def test_graph_logs_include_request_id(caplog):
+    graph = build_portfolio_graph(FakeAssistantService(), FakeRetrievalService(), settings=_test_settings())
+
+    with caplog.at_level(logging.INFO):
+        result = await graph.ainvoke(
+            {
+                "user_query": "Tell me about the first one",
+                "messages": [{"user": "List projects", "assistant": "1. Example project"}],
+                "assistant_subject": "Alex",
+                "request_id": "req-123",
+                "session_id": "session-123",
+            }
+        )
+
+    assert result["route"] == "portfolio_query"
+    assert "request_id=req-123" in caplog.text
+    assert "session_id=session-123" in caplog.text

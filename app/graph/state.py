@@ -15,6 +15,8 @@ class PortfolioState(TypedDict):
     """
 
     user_query: str
+    request_id: NotRequired[str]
+    session_id: NotRequired[str]
     rewritten_query: NotRequired[str]
     messages: NotRequired[list[ConversationTurnState]]
     assistant_subject: NotRequired[str]
