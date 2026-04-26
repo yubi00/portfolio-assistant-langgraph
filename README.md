@@ -130,6 +130,7 @@ uv run portfolio-assistant "who are you" --show-trace --log-level INFO
 ```
 
 Use `--log-level DEBUG` for more verbose local runs, or `--log-level WARNING` when you only want warnings/errors. Use `--no-log-color` to disable ANSI colors.
+Use `--log-format json` or `LOG_FORMAT=json` when you want structured logs for server-side runs or log aggregation.
 
 For API runs, the logs now correlate transport and graph execution with:
 
@@ -137,6 +138,8 @@ For API runs, the logs now correlate transport and graph execution with:
 - `session_id`: stable across follow-up requests in the same conversation
 
 That means one `/prompt` or `/prompt/stream` call can be followed from the API log line into the graph node logs without external tracing infrastructure.
+
+JSON logging is opt-in. The default remains colorized text logs for local development.
 
 ## Current Limitation
 

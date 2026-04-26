@@ -1,5 +1,7 @@
 import logging
+import json
 import sys
+from datetime import datetime, timezone
 
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
@@ -42,11 +44,30 @@ class ColorFormatter(logging.Formatter):
         return f"{color}{message}{RESET_COLOR}"
 
 
-def configure_logging(level: str, use_color: bool = True, force: bool = False) -> None:
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def configure_logging(
+    level: str,
+    use_color: bool = True,
+    force: bool = False,
+    log_format: str = "text",
+) -> None:
     normalized_level = level.upper()
     log_level = getattr(logging, normalized_level, logging.INFO)
     handler = logging.StreamHandler(sys.__stderr__)
-    handler.setFormatter(ColorFormatter(use_color=use_color and sys.stderr.isatty()))
+    formatter = _build_formatter(log_format, use_color)
+    handler.setFormatter(formatter)
 
     root_logger = logging.getLogger()
     if force:
@@ -55,7 +76,7 @@ def configure_logging(level: str, use_color: bool = True, force: bool = False) -
         root_logger.addHandler(handler)
     else:
         for existing_handler in root_logger.handlers:
-            existing_handler.setFormatter(ColorFormatter(use_color=use_color and sys.stderr.isatty()))
+            existing_handler.setFormatter(formatter)
 
     root_logger.setLevel(log_level)
     for noisy_logger_name in ("httpx", "httpcore", "openai"):
@@ -67,3 +88,9 @@ def _graph_color(log_message: str) -> str | None:
         if marker in log_message:
             return color
     return None
+
+
+def _build_formatter(log_format: str, use_color: bool) -> logging.Formatter:
+    if log_format.lower() == "json":
+        return JsonFormatter()
+    return ColorFormatter(use_color=use_color and sys.stderr.isatty())

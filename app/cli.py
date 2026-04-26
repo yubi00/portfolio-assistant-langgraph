@@ -51,6 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable ANSI colors in console logs.",
     )
+    parser.add_argument(
+        "--log-format",
+        choices=["text", "json"],
+        help="Console log format. Defaults to LOG_FORMAT.",
+    )
     return parser
 
 
@@ -121,6 +126,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(
         args.log_level or settings.log_level,
         use_color=settings.log_color and not args.no_log_color,
+        log_format=args.log_format or settings.log_format,
         force=True,
     )
 

@@ -18,6 +18,8 @@ def test_build_parser_accepts_one_shot_prompt():
             "resume.md",
             "--log-level",
             "DEBUG",
+            "--log-format",
+            "json",
             "--no-log-color",
             "--show-trace",
         ]
@@ -26,6 +28,7 @@ def test_build_parser_accepts_one_shot_prompt():
     assert " ".join(args.prompt) == "Tell me about projects"
     assert args.resume_path == "resume.md"
     assert args.log_level == "DEBUG"
+    assert args.log_format == "json"
     assert args.no_log_color is True
     assert args.show_trace is True
 

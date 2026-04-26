@@ -26,11 +26,11 @@ def create_app() -> FastAPI:
     try:
         settings = require_settings()
     except SettingsError as exc:
-        configure_logging("ERROR", use_color=True, force=True)
+        configure_logging("ERROR", use_color=True, force=True, log_format="text")
         logger.error(str(exc))
         return _create_configuration_error_app(str(exc))
 
-    configure_logging(settings.log_level, use_color=settings.log_color)
+    configure_logging(settings.log_level, use_color=settings.log_color, log_format=settings.log_format)
     app = FastAPI(title=APP_TITLE, lifespan=lifespan)
     app.state.session_store = InMemorySessionStore(
         max_history_turns=settings.session_history_max_turns,

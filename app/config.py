@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
     log_color: bool = Field(default=True, validation_alias="LOG_COLOR")
+    log_format: str = Field(default="text", validation_alias="LOG_FORMAT")
 
 
 @lru_cache

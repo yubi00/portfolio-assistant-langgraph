@@ -160,7 +160,7 @@ Checkpointer decision:
 - MUST [x] `POST /prompt` route
 - MUST [x] Graph invocation works
 - MUST [x] Basic error handling
-- SHOULD [ ] Logging
+- SHOULD [x] Logging
 - NICE [x] Config management with `pydantic-settings`
 
 Status: mostly complete for non-streaming Phase 1 API.
@@ -185,9 +185,10 @@ Status: partially complete. The current streaming cut adds an SSE route with `se
 - MUST [x] Basic graph node and route logging
 - SHOULD [x] Request/session correlation across API and graph logs
 - SHOULD [x] Node-level tracing
+- SHOULD [x] Optional structured JSON logging
 - NICE [ ] LangSmith integration
 
-Status: partially complete. Local logging exists with request/session-aware API and graph correlation. Structured JSON logs and external tracing remain future work.
+Status: partially complete. Local logging exists with request/session-aware API and graph correlation, and JSON logging is available as an opt-in mode. External tracing remains future work.
 
 ---
 

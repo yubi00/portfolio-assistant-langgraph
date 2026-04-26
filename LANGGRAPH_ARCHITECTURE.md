@@ -21,7 +21,7 @@ Not implemented yet:
 
 - PDF/DOCX resume ingestion
 - vector/RAG-backed resume retrieval
-- structured/external observability layers
+- external observability layers
 - reliability layers
 
 ---
@@ -389,7 +389,7 @@ Decision: use Python's standard `logging` module with a central formatter, CLI l
 
 Problem solved: local runs expose graph execution in real time without adding a new observability vendor.
 
-Trade-off: console logs are less queryable than structured JSON traces. Later observability work can add JSON logging and LangSmith while keeping these local logs useful.
+Trade-off: plain text logs are easier to read locally, while structured JSON logs are better for aggregation. The current implementation supports both, with text as the default and JSON as an opt-in mode.
 
 ---
 
