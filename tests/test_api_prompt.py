@@ -122,8 +122,12 @@ def test_prompt_stream_route_emits_sse_events(monkeypatch):
     async def fake_run_prompt_stream(request, settings):
         yield {"type": "progress", "data": {"node": "resolve_context", "step": "context_resolved"}}
         yield {"type": "progress", "data": {"node": "plan_retrieval", "step": "retrieval_planned"}}
-        yield {"type": "answer_chunk", "data": "First streamed sentence. "}
-        yield {"type": "answer_chunk", "data": "Second streamed sentence."}
+        yield {"type": "answer_chunk", "data": "First"}
+        yield {"type": "answer_chunk", "data": " streamed"}
+        yield {"type": "answer_chunk", "data": " sentence. "}
+        yield {"type": "answer_chunk", "data": "Second"}
+        yield {"type": "answer_chunk", "data": " streamed"}
+        yield {"type": "answer_chunk", "data": " sentence."}
         yield {
             "type": "answer_completed",
             "data": PromptResponse(
@@ -160,3 +164,6 @@ def test_prompt_stream_route_emits_sse_events(monkeypatch):
     assert "event: answer_completed" in body
     assert '"step": "context_resolved"' in body
     assert '"retrieval_sources": ["projects"]' in body
+    assert body.count("event: answer_chunk") == 2
+    assert '"delta": "First streamed sentence. "' in body
+    assert '"delta": "Second streamed sentence."' in body

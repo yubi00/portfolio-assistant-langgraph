@@ -79,20 +79,32 @@ async def _stream_prompt_response(
     session_store: InMemorySessionStore,
     session_id: str,
 ) -> AsyncIterator[str]:
+    chunk_buffer = _AnswerChunkBuffer(settings.stream_chunk_buffer_chars)
     yield _format_sse_event("session_started", {"session_id": session_id})
     try:
         async for event in run_prompt_stream(request, settings):
             if event["type"] == "progress":
+                buffered_chunk = chunk_buffer.flush()
+                if buffered_chunk:
+                    yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": buffered_chunk})
                 yield _format_sse_event("progress", {"session_id": session_id, **event["data"]})
                 continue
             if event["type"] == "answer_completed":
+                buffered_chunk = chunk_buffer.flush()
+                if buffered_chunk:
+                    yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": buffered_chunk})
                 response = PromptResponse(**event["data"])
                 session_store.set_history(session_id, [turn.model_dump() for turn in response.history])
                 yield _format_sse_event("answer_completed", response.model_dump())
                 continue
             if event["type"] == "answer_chunk":
-                yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": event["data"]})
+                buffered_chunk = chunk_buffer.push(event["data"])
+                if buffered_chunk:
+                    yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": buffered_chunk})
     except Exception:
+        buffered_chunk = chunk_buffer.flush()
+        if buffered_chunk:
+            yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": buffered_chunk})
         yield _format_sse_event(
             "error",
             {
@@ -104,3 +116,27 @@ async def _stream_prompt_response(
 
 def _format_sse_event(event_name: str, data: dict) -> str:
     return f"event: {event_name}\ndata: {json.dumps(data)}\n\n"
+
+
+class _AnswerChunkBuffer:
+    def __init__(self, max_chars: int) -> None:
+        self._max_chars = max_chars
+        self._buffer = ""
+
+    def push(self, chunk: str) -> str | None:
+        self._buffer += chunk
+        if self._should_flush():
+            return self.flush()
+        return None
+
+    def flush(self) -> str | None:
+        if not self._buffer:
+            return None
+        flushed = self._buffer
+        self._buffer = ""
+        return flushed
+
+    def _should_flush(self) -> bool:
+        if len(self._buffer) >= self._max_chars:
+            return True
+        return self._buffer.endswith((" ", "\n", ".", ",", "!", "?", ":", ";"))

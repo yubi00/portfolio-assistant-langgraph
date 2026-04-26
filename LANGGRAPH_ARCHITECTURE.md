@@ -425,7 +425,7 @@ Decision: keep `POST /prompt` for request/response JSON and add a separate `POST
 
 Problem solved: streaming stays transport-specific at the API layer while the underlying prompt runner, graph behavior, session handling, and retrieval logic remain shared.
 
-Trade-off: the current streaming implementation exposes stable `progress` milestones for selected node completions and real streamed output for the `generate_answer` node. It does not stream every internal graph update, which keeps the client contract cleaner but less exhaustive.
+Trade-off: the current streaming implementation exposes stable `progress` milestones for selected node completions and real streamed output for the `generate_answer` node. It lightly buffers tiny token fragments into more natural text chunks and does not stream every internal graph update, which keeps the client contract cleaner but less exhaustive.
 
 ---
 

@@ -143,4 +143,4 @@ The streaming implementation emits these SSE events:
 - `answer_completed`
 - `error`
 
-It reuses the existing prompt runner and session handling. The current version streams real `generate_answer` model output from the graph as it arrives, emits stable `progress` milestones for important graph steps, and then sends final response metadata when the run completes.
+It reuses the existing prompt runner and session handling. The current version streams real `generate_answer` model output from the graph as it arrives, emits stable `progress` milestones for important graph steps, lightly buffers tiny token fragments into more natural text chunks, and then sends final response metadata when the run completes.

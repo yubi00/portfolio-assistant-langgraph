@@ -176,7 +176,7 @@ Status: mostly complete for non-streaming Phase 1 API.
 - NICE [x] Stable progress events for key graph milestones
 - NICE [ ] Exhaustive node-level streaming events
 
-Status: partially complete. The current streaming cut adds an SSE route with `session_started`, `progress`, `answer_chunk`, `answer_completed`, and `error` events while reusing the existing prompt runner and session handling. Answer chunks now come from real graph/LLM streaming in the `generate_answer` step, and `progress` events expose stable milestones such as context resolution and retrieval planning. Exhaustive node-level event streaming remains future work.
+Status: partially complete. The current streaming cut adds an SSE route with `session_started`, `progress`, `answer_chunk`, `answer_completed`, and `error` events while reusing the existing prompt runner and session handling. Answer chunks now come from real graph/LLM streaming in the `generate_answer` step, `progress` events expose stable milestones such as context resolution and retrieval planning, and tiny token fragments are buffered into more natural chunks. Exhaustive node-level event streaming remains future work.
 
 ---
 
