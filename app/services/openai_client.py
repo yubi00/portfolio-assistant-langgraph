@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+
 from langchain_openai import ChatOpenAI
 
 from app.config import Settings
@@ -60,6 +62,17 @@ class OpenAIAssistantClient:
             )
         )
         return response.text.strip()
+
+    async def stream_answer(self, query: str, assistant_subject: str, portfolio_context: str) -> AsyncIterator[str]:
+        async for chunk in self._chat.astream(
+            build_answer_messages(
+                query=query,
+                assistant_subject=assistant_subject,
+                portfolio_context=portfolio_context,
+            )
+        ):
+            if chunk.text:
+                yield chunk.text
 
     def build_friendly_response(self, assistant_subject: str, intent: str | None = None) -> str:
         if intent == "user_task":

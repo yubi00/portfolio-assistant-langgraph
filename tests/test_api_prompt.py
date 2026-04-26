@@ -116,3 +116,47 @@ def test_create_app_returns_configuration_error_app_when_settings_are_invalid(mo
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Missing config"}
+
+
+def test_prompt_stream_route_emits_sse_events(monkeypatch):
+    async def fake_run_prompt_stream(request, settings):
+        yield {"type": "progress", "data": {"node": "resolve_context", "step": "context_resolved"}}
+        yield {"type": "progress", "data": {"node": "plan_retrieval", "step": "retrieval_planned"}}
+        yield {"type": "answer_chunk", "data": "First streamed sentence. "}
+        yield {"type": "answer_chunk", "data": "Second streamed sentence."}
+        yield {
+            "type": "answer_completed",
+            "data": PromptResponse(
+                answer="First streamed sentence. Second streamed sentence.",
+                session_id=request.session_id,
+                history=[
+                    {"user": request.prompt, "assistant": "First streamed sentence. Second streamed sentence."},
+                ],
+                is_relevant=True,
+                intent="projects",
+                route="portfolio_query",
+                retrieval_sources=["projects"],
+                retrieval_reason="Project questions need project data.",
+                retrieval_errors=[],
+                rewritten_query=request.prompt,
+                node_trace=["ingest_user_message", "generate_answer", "save_memory"],
+            ).model_dump(),
+        }
+
+    monkeypatch.setattr(prompt_api, "run_prompt_stream", fake_run_prompt_stream)
+    monkeypatch.setattr(app_main, "require_settings", _test_settings)
+
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = _test_settings
+
+    with client.stream("POST", "/prompt/stream", json={"prompt": "What projects has Alex built?"}) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: session_started" in body
+    assert "event: progress" in body
+    assert "event: answer_chunk" in body
+    assert "event: answer_completed" in body
+    assert '"step": "context_resolved"' in body
+    assert '"retrieval_sources": ["projects"]' in body

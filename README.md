@@ -72,6 +72,14 @@ API session memory is now available through `session_id`. Omit it on the first r
 
 The current memory model is a bounded app-level session store. LangGraph checkpointers were evaluated and intentionally deferred because this repo currently only needs short-term conversational memory, not durable thread persistence.
 
+Streaming is available through `POST /prompt/stream` using Server-Sent Events (SSE).
+
+```powershell
+Invoke-WebRequest -Method Post http://127.0.0.1:8000/prompt/stream `
+  -ContentType "application/json" `
+  -Body '{"prompt":"What projects has this person built?"}'
+```
+
 ## CLI
 
 One-shot prompt:
@@ -126,3 +134,13 @@ Use `--log-level DEBUG` for more verbose local runs, or `--log-level WARNING` wh
 ## Current Limitation
 
 Resume PDF loading is supported from `data/resume.pdf`, but richer PDF/DOCX ingestion and RAG are intentionally deferred.
+
+The streaming implementation emits these SSE events:
+
+- `session_started`
+- `progress`
+- `answer_chunk`
+- `answer_completed`
+- `error`
+
+It reuses the existing prompt runner and session handling. The current version streams real `generate_answer` model output from the graph as it arrives, emits stable `progress` milestones for important graph steps, and then sends final response metadata when the run completes.

@@ -15,6 +15,7 @@ Implemented phases:
 - Phase 2: retrieval planning with explicit source categories and debug-visible planned sources
 - Phase 3A: retrieval nodes, GitHub project retrieval, local resume/docs retrieval, and context merging
 - Phase 6A/B: API session contract, app-level session store, explicit `save_memory` graph step, and checkpointer evaluation
+- Phase 8A: SSE streaming route reusing the existing prompt runner and graph-level answer-token streaming
 
 Not implemented yet:
 
@@ -32,6 +33,7 @@ flowchart LR
     User["User"]
     CLI["CLI\nportfolio-assistant"]
     API["FastAPI\nPOST /prompt"]
+    StreamAPI["FastAPI\nPOST /prompt/stream"]
     Runner["Prompt Runner\ntransport-independent"]
     Graph["LangGraph StateGraph"]
     Sessions["InMemorySessionStore\nsession_id -> history"]
@@ -40,11 +42,15 @@ flowchart LR
 
     User --> CLI
     User --> API
+    User --> StreamAPI
     CLI --> Runner
     API --> Runner
+    StreamAPI --> Runner
     Runner --> Graph
     API --> Sessions
+    StreamAPI --> Sessions
     Sessions --> API
+    Sessions --> StreamAPI
     Graph --> OpenAI
     Config --> CLI
     Config --> API
@@ -53,6 +59,8 @@ flowchart LR
 ```
 
 Key boundary: CLI and FastAPI are transports. They do not own assistant behavior. Both call the same `run_prompt()` service, which invokes the graph and shapes the response.
+
+The streaming route keeps this boundary intact: SSE framing stays in `app.api.prompt`, while orchestration and answer generation remain in the shared prompt runner and graph-backed services.
 
 ---
 
@@ -406,6 +414,18 @@ Decision: do not adopt checkpointers in this portfolio assistant yet. Keep the c
 Problem solved: the project keeps a simpler memory model that is easier to inspect, explain, and test while still supporting contextual follow-up questions across API requests.
 
 Trade-off: sessions are not durable across restarts and do not scale across multiple instances. We should revisit checkpointers only if the assistant needs durable sessions, shared multi-instance memory, human-in-the-loop interrupt/resume flows, or richer persisted graph state than recent conversation history.
+
+---
+
+### 15. Add A Separate Streaming Route
+
+Problem: streaming and non-streaming clients have different transport needs, but they should still share the same orchestration and session behavior.
+
+Decision: keep `POST /prompt` for request/response JSON and add a separate `POST /prompt/stream` route for SSE streaming.
+
+Problem solved: streaming stays transport-specific at the API layer while the underlying prompt runner, graph behavior, session handling, and retrieval logic remain shared.
+
+Trade-off: the current streaming implementation exposes stable `progress` milestones for selected node completions and real streamed output for the `generate_answer` node. It does not stream every internal graph update, which keeps the client contract cleaner but less exhaustive.
 
 ---
 
