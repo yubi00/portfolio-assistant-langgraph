@@ -18,6 +18,21 @@ async def test_resume_retrieval_reads_configured_text_file(tmp_path, monkeypatch
     assert result.error is None
 
 
+async def test_resume_retrieval_strips_control_characters(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    resume_path = tmp_path / "resume.md"
+    resume_path.write_text("# Resume\x7f\n\nBackend engineer\twith AI experience.", encoding="utf-8")
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(_env_file=None, OPENAI_API_KEY="test", ASSISTANT_SUBJECT="Alex")
+    )
+
+    result = await service.retrieve_resume(str(resume_path))
+
+    assert result.source == RetrievalSource.RESUME
+    assert result.content == "# Resume\n\nBackend engineer\twith AI experience."
+    assert result.error is None
+
+
 async def test_resume_retrieval_reports_missing_path(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     service = ConfiguredPortfolioRetrievalService(

@@ -1,4 +1,5 @@
 import logging
+import unicodedata
 from pathlib import Path
 from typing import Protocol
 
@@ -114,7 +115,7 @@ def _read_text_source(source: RetrievalSource, configured_path: str | None, env_
     try:
         if path.suffix.lower() == ".pdf":
             return RetrievalResult(source=source, content=_extract_pdf_text(path))
-        return RetrievalResult(source=source, content=path.read_text(encoding="utf-8").strip())
+        return RetrievalResult(source=source, content=_normalize_text_content(path.read_text(encoding="utf-8")))
     except OSError as exc:
         return RetrievalResult(source=source, error=f"Could not read {source.value} file: {exc}")
 
@@ -138,7 +139,17 @@ def _load_default_resume_source() -> RetrievalResult:
 def _extract_pdf_text(path: Path) -> str:
     reader = PdfReader(str(path))
     pages = [page.extract_text() or "" for page in reader.pages]
-    return "\n\n".join(page.strip() for page in pages if page.strip()).strip()
+    raw_text = "\n\n".join(page.strip() for page in pages if page.strip())
+    return _normalize_text_content(raw_text)
+
+
+def _normalize_text_content(content: str) -> str:
+    cleaned = "".join(
+        char
+        for char in content
+        if char in {"\n", "\r", "\t"} or not unicodedata.category(char).startswith("C")
+    )
+    return cleaned.strip()
 
 
 def _log_resume_preload_result(source: str, result: RetrievalResult) -> None:

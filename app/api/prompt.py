@@ -1,5 +1,8 @@
 import json
+import logging
 from collections.abc import AsyncIterator
+from time import perf_counter
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -10,6 +13,7 @@ from app.services.prompt_runner import run_prompt, run_prompt_stream
 from app.services.session_store import InMemorySessionStore, SessionNotFoundError
 
 router = APIRouter()
+logger = logging.getLogger("app.api.prompt")
 STREAM_HEADERS = {
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
@@ -23,16 +27,49 @@ async def prompt(
     http_request: Request,
     settings: Settings = Depends(get_settings),
 ) -> PromptResponse:
+    request_id = _new_request_id()
+    started_at = perf_counter()
     try:
         session_store, session_id, effective_request = _prepare_effective_request(request, http_request)
+        logger.info(
+            "prompt request started | request_id=%s | session_id=%s | prompt=%r",
+            request_id,
+            session_id,
+            _shorten(request.prompt),
+        )
         response = await run_prompt(effective_request, settings)
         session_store.set_history(session_id, [turn.model_dump() for turn in response.history])
+        logger.info(
+            "prompt request completed | request_id=%s | session_id=%s | route=%s | intent=%s | duration_ms=%.1f",
+            request_id,
+            session_id,
+            response.route,
+            response.intent,
+            (perf_counter() - started_at) * 1000,
+        )
         return response
     except SessionNotFoundError as exc:
+        logger.warning(
+            "prompt request failed | request_id=%s | session_id=%s | status=404 | detail=%s",
+            request_id,
+            request.session_id,
+            exc,
+        )
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
+        logger.warning(
+            "prompt request failed | request_id=%s | session_id=%s | status=400 | detail=%s",
+            request_id,
+            request.session_id,
+            exc,
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception(
+            "prompt request failed | request_id=%s | session_id=%s | status=500",
+            request_id,
+            request.session_id,
+        )
         raise HTTPException(status_code=500, detail="Prompt processing failed.") from exc
 
 
@@ -42,15 +79,43 @@ async def prompt_stream(
     http_request: Request,
     settings: Settings = Depends(get_settings),
 ) -> StreamingResponse:
+    request_id = _new_request_id()
+    started_at = perf_counter()
     try:
         session_store, session_id, effective_request = _prepare_effective_request(request, http_request)
     except SessionNotFoundError as exc:
+        logger.warning(
+            "prompt stream failed | request_id=%s | session_id=%s | status=404 | detail=%s",
+            request_id,
+            request.session_id,
+            exc,
+        )
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
+        logger.warning(
+            "prompt stream failed | request_id=%s | session_id=%s | status=400 | detail=%s",
+            request_id,
+            request.session_id,
+            exc,
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    logger.info(
+        "prompt stream started | request_id=%s | session_id=%s | prompt=%r",
+        request_id,
+        session_id,
+        _shorten(request.prompt),
+    )
+
     return StreamingResponse(
-        _stream_prompt_response(effective_request, settings, session_store, session_id),
+        _stream_prompt_response(
+            effective_request,
+            settings,
+            session_store,
+            session_id,
+            request_id=request_id,
+            started_at=started_at,
+        ),
         media_type="text/event-stream",
         headers=STREAM_HEADERS,
     )
@@ -78,33 +143,60 @@ async def _stream_prompt_response(
     settings: Settings,
     session_store: InMemorySessionStore,
     session_id: str,
+    request_id: str,
+    started_at: float,
 ) -> AsyncIterator[str]:
     chunk_buffer = _AnswerChunkBuffer(settings.stream_chunk_buffer_chars)
+    progress_count = 0
+    answer_chunk_count = 0
     yield _format_sse_event("session_started", {"session_id": session_id})
     try:
         async for event in run_prompt_stream(request, settings):
             if event["type"] == "progress":
                 buffered_chunk = chunk_buffer.flush()
                 if buffered_chunk:
+                    answer_chunk_count += 1
                     yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": buffered_chunk})
+                progress_count += 1
                 yield _format_sse_event("progress", {"session_id": session_id, **event["data"]})
                 continue
             if event["type"] == "answer_completed":
                 buffered_chunk = chunk_buffer.flush()
                 if buffered_chunk:
+                    answer_chunk_count += 1
                     yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": buffered_chunk})
                 response = PromptResponse(**event["data"])
                 session_store.set_history(session_id, [turn.model_dump() for turn in response.history])
+                logger.info(
+                    "prompt stream completed | request_id=%s | session_id=%s | route=%s | intent=%s | progress_events=%s | answer_chunks=%s | duration_ms=%.1f",
+                    request_id,
+                    session_id,
+                    response.route,
+                    response.intent,
+                    progress_count,
+                    answer_chunk_count,
+                    (perf_counter() - started_at) * 1000,
+                )
                 yield _format_sse_event("answer_completed", response.model_dump())
                 continue
             if event["type"] == "answer_chunk":
                 buffered_chunk = chunk_buffer.push(event["data"])
                 if buffered_chunk:
+                    answer_chunk_count += 1
                     yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": buffered_chunk})
     except Exception:
         buffered_chunk = chunk_buffer.flush()
         if buffered_chunk:
+            answer_chunk_count += 1
             yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": buffered_chunk})
+        logger.exception(
+            "prompt stream failed | request_id=%s | session_id=%s | progress_events=%s | answer_chunks=%s | duration_ms=%.1f",
+            request_id,
+            session_id,
+            progress_count,
+            answer_chunk_count,
+            (perf_counter() - started_at) * 1000,
+        )
         yield _format_sse_event(
             "error",
             {
@@ -116,6 +208,17 @@ async def _stream_prompt_response(
 
 def _format_sse_event(event_name: str, data: dict) -> str:
     return f"event: {event_name}\ndata: {json.dumps(data)}\n\n"
+
+
+def _new_request_id() -> str:
+    return uuid4().hex[:12]
+
+
+def _shorten(value: str, max_chars: int = 80) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[: max_chars - 3] + "..."
 
 
 class _AnswerChunkBuffer:
