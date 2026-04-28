@@ -206,10 +206,60 @@ Status: partially complete. OpenAI-backed graph steps now use configurable timeo
 
 ## Phase 11 - Comparison
 
-- MUST [ ] Compare with current system
-- MUST [ ] Identify strengths/weaknesses
+- MUST [x] Compare with current system
+- MUST [x] Identify strengths/weaknesses
 - SHOULD [ ] Performance comparison
 - NICE [ ] Write final conclusions
+
+Status: initial architecture comparison complete.
+
+Notes:
+- The LangGraph implementation is stronger for orchestration because graph state, route decisions, retrieval planning, retrieval execution, context merge, answer generation, and memory are explicit and testable.
+- The old `yubi-ai-portfolio-api` is still ahead on production hardening: auth, rate limiting, public endpoint protection, and deployment security.
+- Do not copy the old MCP architecture into this repo for now. The current goal is a LangGraph-native assistant, not an MCP client/server split.
+- Selectively bring over production hardening ideas later when preparing to replace the old public backend.
+
+---
+
+## Phase 12 - Resume Embeddings And Vector Retrieval
+
+- MUST [ ] Define resume ingestion output format for vector indexing
+- MUST [ ] Chunk resume into stable sections suitable for retrieval
+- MUST [ ] Generate embeddings for resume chunks through an offline or startup script
+- MUST [ ] Store vectors in a local/dev-friendly vector store first
+- MUST [ ] Retrieve top-k resume chunks for resume-related questions
+- SHOULD [ ] Keep current full-resume loading as a fallback during migration
+- SHOULD [ ] Add tests for chunking, retrieval fallback, and no-result behavior
+- NICE [ ] Extend the same ingestion pattern to docs and case studies later
+
+Status: planned, intentionally deferred until the current non-vector assistant is stable.
+
+Notes:
+- Resume section-aware retrieval is parked until this phase. Do not build a separate deterministic section router unless there is a clear short-term need.
+- This phase should mimic production RAG behavior more closely than ad-hoc section splitting.
+- The first implementation should stay simple: offline/scripted indexing, small top-k retrieval, clear fallback when embeddings are unavailable.
+
+---
+
+## Phase 13 - Public Production Hardening
+
+- MUST [ ] Add route-level rate limiting for `/prompt` and `/prompt/stream`
+- MUST [ ] Add streaming concurrency protection
+- MUST [ ] Add public auth gate suitable for a portfolio site
+- MUST [ ] Add browser-friendly auth flow before enabling auth in production
+- MUST [ ] Add secure CORS/origin policy for public deployment
+- MUST [ ] Hide development-only docs/routes in production where appropriate
+- MUST [ ] Ensure client-visible errors do not leak internal service details
+- SHOULD [ ] Add request abuse logging and rate-limit hit logging
+- SHOULD [ ] Add security-focused tests around auth, rate limits, and streaming errors
+- NICE [ ] Move rate-limit/session state to shared storage if deploying more than one instance
+
+Status: planned for public replacement readiness.
+
+Notes:
+- Use the old `yubi-ai-portfolio-api` security hardening as reference material, not as code to copy blindly.
+- Auth is required before this replaces the old public system because the API can incur real OpenAI/GitHub cost.
+- Keep this separate from orchestration work so the graph remains simple and testable.
 
 ---
 
@@ -219,13 +269,14 @@ This section tracks capability upgrades that make the assistant materially smart
 
 Guiding principle:
 - prefer better retrieval quality and evidence selection before adding heavier agent loops or memory systems
+- keep orchestration LangGraph-native for now; do not introduce MCP unless a clear tool/plugin boundary becomes necessary
 
 ### Near-Term: High Impact, Lower Complexity
 
 - SHOULD [x] Enrich `projects` retrieval with README content
 - SHOULD [ ] Add featured project detail
 - SHOULD [ ] Add relevance scoring/ranking so project answers prefer the best-matching projects instead of mostly recent repositories
-- SHOULD [ ] Make resume retrieval section-aware for skills, work history, education, and certifications
+- SHOULD [ ] Park resume section-aware retrieval until the resume embeddings/vector phase
 - SHOULD [x] Add clarification behavior for ambiguous follow-up questions instead of guessing
 
 Expected value:
@@ -234,7 +285,7 @@ Expected value:
 
 ### Mid-Term: High Impact, Moderate Complexity
 
-- SHOULD [ ] Add deduplication and evidence selection across multi-source context
+- SHOULD [ ] Park deduplication/evidence selection until retrieval volume makes context noise a real problem
 - SHOULD [x] Add deeper project drill-down retrieval for one selected repository
 - SHOULD [ ] Support query-specific source expansion when one source is clearly insufficient
 - SHOULD [ ] Add structured answer modes for concise vs detailed responses
@@ -245,6 +296,7 @@ Expected value:
 
 ### Later: Advanced Capability Upgrades
 
+- NICE [ ] Add resume embeddings and vector retrieval
 - NICE [ ] Add richer long-form docs ingestion and selective RAG for larger document sets
 - NICE [ ] Add entity/topic memory beyond bounded chat history
 - NICE [ ] Add evaluation datasets for answer quality and retrieval quality
@@ -257,12 +309,12 @@ Expected value:
 
 ### Recommended Implementation Order
 
-1. README/project-detail retrieval
-2. Project relevance scoring/ranking
-3. Resume section-aware retrieval
-4. Clarification behavior for ambiguity
-5. Project deep-dive retrieval path
-6. Deduplication/evidence selection
+1. Project relevance scoring/ranking
+2. Featured project detail
+3. Structured answer modes for concise vs detailed responses
+4. Performance comparison against the old system
+5. Resume embeddings/vector retrieval
+6. Public production hardening: auth, rate limits, CORS, streaming abuse protection
 7. Larger-doc RAG only when needed
 
 ---
