@@ -118,6 +118,12 @@ Guiding principle:
 * Do not break existing functionality
 * Validate changes before finalizing
 
+### Documentation
+
+* Update relevant docs when behavior, setup, architecture, or phase status changes
+* Prefer central docs such as the `README`, architecture notes, and progress/dev plan when the change affects users or future development
+* Do not churn docs for purely internal edits that do not change behavior or decisions
+
 ---
 
 ## 8. Performance
@@ -173,6 +179,7 @@ Before finalizing:
 * Is the solution unnecessarily complex?
 * Are changes minimal and focused?
 * Does it break existing behavior?
+* Do relevant docs or plan notes need updating?
 
 If any answer is “no” → revise
 
