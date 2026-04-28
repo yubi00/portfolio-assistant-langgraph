@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.config import Settings, get_settings
+from app.errors import UpstreamServiceError
 from app.schemas import ConversationTurn, PromptRequest, PromptResponse
 from app.services.prompt_runner import run_prompt, run_prompt_stream
 from app.services.session_store import InMemorySessionStore, SessionNotFoundError
@@ -64,6 +65,14 @@ async def prompt(
             exc,
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except UpstreamServiceError as exc:
+        logger.warning(
+            "prompt request failed | request_id=%s | session_id=%s | status=503 | detail=%s",
+            request_id,
+            request.session_id,
+            exc,
+        )
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception(
             "prompt request failed | request_id=%s | session_id=%s | status=500",
@@ -99,6 +108,14 @@ async def prompt_stream(
             exc,
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except UpstreamServiceError as exc:
+        logger.warning(
+            "prompt stream failed | request_id=%s | session_id=%s | status=503 | detail=%s",
+            request_id,
+            request.session_id,
+            exc,
+        )
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     logger.info(
         "prompt stream started | request_id=%s | session_id=%s | prompt=%r",
@@ -149,6 +166,7 @@ async def _stream_prompt_response(
     chunk_buffer = _AnswerChunkBuffer(settings.stream_chunk_buffer_chars)
     progress_count = 0
     answer_chunk_count = 0
+    partial_answer_parts: list[str] = []
     yield _format_sse_event("session_started", {"session_id": session_id})
     try:
         async for event in run_prompt_stream(request, settings, request_id=request_id):
@@ -156,6 +174,7 @@ async def _stream_prompt_response(
                 buffered_chunk = chunk_buffer.flush()
                 if buffered_chunk:
                     answer_chunk_count += 1
+                    partial_answer_parts.append(buffered_chunk)
                     yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": buffered_chunk})
                 progress_count += 1
                 yield _format_sse_event("progress", {"session_id": session_id, **event["data"]})
@@ -164,6 +183,7 @@ async def _stream_prompt_response(
                 buffered_chunk = chunk_buffer.flush()
                 if buffered_chunk:
                     answer_chunk_count += 1
+                    partial_answer_parts.append(buffered_chunk)
                     yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": buffered_chunk})
                 response = PromptResponse(**event["data"])
                 session_store.set_history(session_id, [turn.model_dump() for turn in response.history])
@@ -183,11 +203,36 @@ async def _stream_prompt_response(
                 buffered_chunk = chunk_buffer.push(event["data"])
                 if buffered_chunk:
                     answer_chunk_count += 1
+                    partial_answer_parts.append(buffered_chunk)
                     yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": buffered_chunk})
+    except UpstreamServiceError as exc:
+        buffered_chunk = chunk_buffer.flush()
+        if buffered_chunk:
+            answer_chunk_count += 1
+            partial_answer_parts.append(buffered_chunk)
+            yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": buffered_chunk})
+        logger.warning(
+            "prompt stream failed | request_id=%s | session_id=%s | progress_events=%s | answer_chunks=%s | duration_ms=%.1f | detail=%s",
+            request_id,
+            session_id,
+            progress_count,
+            answer_chunk_count,
+            (perf_counter() - started_at) * 1000,
+            exc,
+        )
+        yield _format_sse_event(
+            "error",
+            {
+                "session_id": session_id,
+                "detail": str(exc),
+                "partial_answer": "".join(partial_answer_parts),
+            },
+        )
     except Exception:
         buffered_chunk = chunk_buffer.flush()
         if buffered_chunk:
             answer_chunk_count += 1
+            partial_answer_parts.append(buffered_chunk)
             yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": buffered_chunk})
         logger.exception(
             "prompt stream failed | request_id=%s | session_id=%s | progress_events=%s | answer_chunks=%s | duration_ms=%.1f",
@@ -202,6 +247,7 @@ async def _stream_prompt_response(
             {
                 "session_id": session_id,
                 "detail": "Prompt processing failed.",
+                "partial_answer": "".join(partial_answer_parts),
             },
         )
 

@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     openai_model_default: str = Field(default="gpt-4.1-mini", validation_alias="OPENAI_MODEL_DEFAULT")
     openai_temperature: float = Field(default=0.2, validation_alias="OPENAI_TEMPERATURE")
+    openai_timeout_seconds: float = Field(default=30.0, validation_alias="OPENAI_TIMEOUT_SECONDS")
+    openai_max_retries: int = Field(default=2, validation_alias="OPENAI_MAX_RETRIES")
 
     assistant_subject: str = Field(validation_alias="ASSISTANT_SUBJECT")
 

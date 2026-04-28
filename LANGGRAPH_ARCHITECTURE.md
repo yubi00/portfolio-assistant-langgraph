@@ -22,7 +22,7 @@ Not implemented yet:
 - PDF/DOCX resume ingestion
 - vector/RAG-backed resume retrieval
 - external observability layers
-- reliability layers
+- advanced reliability layers
 
 ---
 
@@ -438,6 +438,18 @@ Decision: propagate `request_id` and `session_id` into initial graph state and i
 Problem solved: one request can now be traced cleanly across transport logs and graph execution logs.
 
 Trade-off: graph state now carries a small amount of transport-derived metadata. This is acceptable because the metadata is observability-only and does not influence orchestration decisions.
+
+---
+
+### 17. Add Basic Upstream Reliability Controls
+
+Problem: upstream LLM failures should not always surface as generic internal server errors, and OpenAI-backed graph steps need bounded timeout and retry behavior.
+
+Decision: configure `ChatOpenAI` with explicit timeout and retry settings, and translate upstream AI failures into an `UpstreamServiceError` that maps to `503` for `/prompt` and a structured `error` event for `/prompt/stream`.
+
+Problem solved: transient upstream issues have a better chance of recovery, and failure responses now communicate dependency problems more accurately.
+
+Trade-off: the current error wrapping is intentionally narrow and focused on the AI boundary. Streaming now preserves partial generated output in the final `error` event, but broader fallback strategies and non-stream partial-response behavior remain future Phase 10 work.
 
 ---
 

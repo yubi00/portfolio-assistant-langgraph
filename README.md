@@ -141,6 +141,16 @@ That means one `/prompt` or `/prompt/stream` call can be followed from the API l
 
 JSON logging is opt-in. The default remains colorized text logs for local development.
 
+## Reliability
+
+The app now applies basic reliability controls to OpenAI-backed graph steps:
+
+- configurable request timeout with `OPENAI_TIMEOUT_SECONDS`
+- configurable client retries with `OPENAI_MAX_RETRIES`
+- non-streaming `/prompt` returns `503` for upstream AI-service failures
+- streaming `/prompt/stream` emits an `error` SSE event with the upstream failure detail
+- when a stream fails after partial output, the `error` event includes `partial_answer`
+
 ## Current Limitation
 
 Resume PDF loading is supported from `data/resume.pdf`, but richer PDF/DOCX ingestion and RAG are intentionally deferred.

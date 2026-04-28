@@ -194,10 +194,12 @@ Status: partially complete. Local logging exists with request/session-aware API 
 
 ## Phase 10 - Reliability
 
-- MUST [ ] Retry mechanism
-- MUST [ ] Graceful failure handling
-- SHOULD [ ] Partial responses
+- MUST [x] Retry mechanism
+- MUST [x] Graceful failure handling
+- SHOULD [x] Partial responses
 - NICE [ ] Advanced fallback strategies
+
+Status: partially complete. OpenAI-backed graph steps now use configurable timeout and retry settings, `/prompt` maps upstream AI failures to `503`, and `/prompt/stream` emits structured `error` events for upstream failures while preserving `partial_answer` when output was already streamed. Richer fallback strategies remain open.
 
 ---
 

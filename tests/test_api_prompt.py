@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from app import main as app_main
 from app.api import prompt as prompt_api
 from app.config import Settings, SettingsError, get_settings
+from app.errors import UpstreamServiceError
 from app.main import create_app
 from app.schemas import PromptResponse
 
@@ -167,3 +168,62 @@ def test_prompt_stream_route_emits_sse_events(monkeypatch):
     assert body.count("event: answer_chunk") == 2
     assert '"delta": "First streamed sentence. "' in body
     assert '"delta": "Second streamed sentence."' in body
+
+
+def test_prompt_route_returns_503_for_upstream_ai_failure(monkeypatch):
+    async def fake_run_prompt(request, settings, *, request_id=None):
+        raise UpstreamServiceError("AI service failed during answer generation.")
+
+    monkeypatch.setattr(prompt_api, "run_prompt", fake_run_prompt)
+    monkeypatch.setattr(app_main, "require_settings", _test_settings)
+
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = _test_settings
+
+    response = client.post("/prompt", json={"prompt": "What projects has Alex built?"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "AI service failed during answer generation."
+
+
+def test_prompt_stream_emits_upstream_error_event(monkeypatch):
+    async def fake_run_prompt_stream(request, settings, *, request_id=None):
+        raise UpstreamServiceError("AI service failed during answer streaming.")
+        yield
+
+    monkeypatch.setattr(prompt_api, "run_prompt_stream", fake_run_prompt_stream)
+    monkeypatch.setattr(app_main, "require_settings", _test_settings)
+
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = _test_settings
+
+    with client.stream("POST", "/prompt/stream", json={"prompt": "What projects has Alex built?"}) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: error" in body
+    assert '"detail": "AI service failed during answer streaming."' in body
+    assert '"partial_answer": ""' in body
+
+
+def test_prompt_stream_preserves_partial_answer_on_upstream_failure(monkeypatch):
+    async def fake_run_prompt_stream(request, settings, *, request_id=None):
+        yield {"type": "progress", "data": {"node": "generate_answer", "step": "answer_started"}}
+        yield {"type": "answer_chunk", "data": "First partial sentence. "}
+        raise UpstreamServiceError("AI service failed during answer streaming.")
+
+    monkeypatch.setattr(prompt_api, "run_prompt_stream", fake_run_prompt_stream)
+    monkeypatch.setattr(app_main, "require_settings", _test_settings)
+
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = _test_settings
+
+    with client.stream("POST", "/prompt/stream", json={"prompt": "What projects has Alex built?"}) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: answer_chunk" in body
+    assert '"delta": "First partial sentence. "' in body
+    assert "event: error" in body
+    assert '"detail": "AI service failed during answer streaming."' in body
+    assert '"partial_answer": "First partial sentence. "' in body
