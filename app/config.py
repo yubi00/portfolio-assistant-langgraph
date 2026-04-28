@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     github_projects_limit: int = Field(default=12, validation_alias="GITHUB_PROJECTS_LIMIT")
     github_include_forks: bool = Field(default=False, validation_alias="GITHUB_INCLUDE_FORKS")
     github_readme_max_chars: int = Field(default=1800, validation_alias="GITHUB_README_MAX_CHARS")
+    github_target_readme_max_chars: int = Field(default=6000, validation_alias="GITHUB_TARGET_README_MAX_CHARS")
 
     docs_path: str | None = Field(default=None, validation_alias="DOCS_PATH")
     merged_context_max_chars: int = Field(default=12000, validation_alias="MERGED_CONTEXT_MAX_CHARS")

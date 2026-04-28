@@ -89,6 +89,7 @@ Status: complete for first retrieval-node implementation.
 
 Notes:
 - `projects` uses GitHub REST API and best-effort README enrichment.
+- Named project queries focus retrieval on the matching repository and use a larger README excerpt budget for deeper project-specific answers.
 - Work-experience answers use the `resume` source because the resume already contains employment history.
 - The app auto-loads `data/resume.md` or `data/resume.pdf` by default.
 - CLI supports `--resume-path` only as a one-off testing override.
@@ -234,7 +235,7 @@ Expected value:
 ### Mid-Term: High Impact, Moderate Complexity
 
 - SHOULD [ ] Add deduplication and evidence selection across multi-source context
-- SHOULD [ ] Add deeper project drill-down retrieval for one selected repository
+- SHOULD [x] Add deeper project drill-down retrieval for one selected repository
 - SHOULD [ ] Support query-specific source expansion when one source is clearly insufficient
 - SHOULD [ ] Add structured answer modes for concise vs detailed responses
 

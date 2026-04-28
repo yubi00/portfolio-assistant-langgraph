@@ -102,7 +102,7 @@ class PortfolioGraphNodes:
         if not _source_was_planned(state, RetrievalSource.PROJECTS):
             return skipped_update(NodeName.RETRIEVE_PROJECTS, "projects source was not planned")
 
-        result = await self._retrieval_service.retrieve_projects()
+        result = await self._retrieval_service.retrieve_projects(state.get("rewritten_query"))
         return _result_update(result, "project_context", NodeName.RETRIEVE_PROJECTS)
 
     @log_node(NodeName.RETRIEVE_RESUME)

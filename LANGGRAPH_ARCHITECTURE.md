@@ -123,6 +123,7 @@ The first retrieval implementation uses:
 
 - GitHub REST API for `projects`; forks are excluded by default for "built projects" accuracy
 - best-effort README enrichment for selected repositories, bounded by `GITHUB_README_MAX_CHARS`
+- focused named-repository retrieval for project deep dives, bounded by `GITHUB_TARGET_README_MAX_CHARS`
 - local text/markdown files for `resume` and `docs`
 
 The graph dispatches only planned retrieval sources with LangGraph dynamic sends. Independent retrieval nodes can run concurrently, then join at `merge_normalize_context`.
@@ -135,12 +136,15 @@ Trade-off: fan-out introduces more graph-routing complexity and retrieval node o
 
 Project retrieval strategy:
 
-- Current: fetch recent GitHub repositories for `GITHUB_OWNER`, excluding forks unless `GITHUB_INCLUDE_FORKS=true`, then fetch README excerpts for selected repositories when available.
+- Current: fetch GitHub repository metadata for `GITHUB_OWNER`, excluding forks unless `GITHUB_INCLUDE_FORKS=true`.
+- Broad project questions format the most recent `GITHUB_PROJECTS_LIMIT` repositories and fetch bounded README excerpts when available.
+- Named project questions, including context-resolved follow-ups, focus retrieval on the matching repository and fetch a larger README excerpt for deeper answers.
 - Later: add pinned/featured project configuration, scoring, and cache policy.
 
 Problem solved: "what projects has this person built?" should not treat forked repositories as owned work.
+Project-specific questions should not dump unrelated repositories into context when the user clearly asks about one repo.
 
-Trade-off: excluding forks may hide meaningful fork-based contributions. README fetches are best-effort, so repositories without a README still work but provide less detail. A future contribution-focused query can use a separate retrieval mode or include forks conditionally.
+Trade-off: excluding forks may hide meaningful fork-based contributions. README fetches are best-effort, so repositories without a README still work but provide less detail. Named-repository matching depends on the repo name appearing in the rewritten query; future scoring or embeddings can improve fuzzy project matching.
 
 Resume strategy:
 

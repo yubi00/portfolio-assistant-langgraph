@@ -104,6 +104,50 @@ async def test_project_retrieval_keeps_metadata_when_readme_is_missing(tmp_path,
     assert "README excerpt:" not in result.content
 
 
+async def test_project_retrieval_focuses_on_named_repository(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(retrieval_module.httpx, "AsyncClient", lambda timeout: FakeGitHubClient())
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            GITHUB_OWNER="alex",
+            GITHUB_TARGET_README_MAX_CHARS=200,
+        )
+    )
+
+    result = await service.retrieve_projects("Tell me about project-with-readme architecture")
+
+    assert result.source == RetrievalSource.PROJECTS
+    assert result.error is None
+    assert result.content.startswith("Focused GitHub project:")
+    assert "- project-with-readme" in result.content
+    assert "This project uses LangGraph and OpenAI" in result.content
+    assert "- project-without-readme" not in result.content
+
+
+async def test_project_retrieval_prefers_longest_repository_name(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(retrieval_module.httpx, "AsyncClient", lambda timeout: FakeGitHubClient())
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            GITHUB_OWNER="alex",
+        )
+    )
+
+    result = await service.retrieve_projects("Tell me about project-with-readme-api")
+
+    assert result.source == RetrievalSource.PROJECTS
+    assert result.error is None
+    assert result.content.startswith("Focused GitHub project:")
+    assert "- project-with-readme-api" in result.content
+    assert "- project-with-readme\n" not in result.content
+
+
 async def test_resume_preload_logs_selected_source(tmp_path, caplog, monkeypatch):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
@@ -176,6 +220,16 @@ class FakeGitHubClient:
                         "fork": False,
                     },
                     {
+                        "name": "project-with-readme-api",
+                        "description": "Longer matching project.",
+                        "language": "Python",
+                        "stargazers_count": 2,
+                        "html_url": "https://github.com/alex/project-with-readme-api",
+                        "topics": ["api"],
+                        "archived": False,
+                        "fork": False,
+                    },
+                    {
                         "name": "project-without-readme",
                         "description": "Project without README.",
                         "language": "TypeScript",
@@ -194,4 +248,9 @@ class FakeGitHubClient:
             return FakeResponse({"content": encoded}, status_code=self._readme_status)
         if url.endswith("/repos/alex/project-without-readme/readme"):
             return FakeResponse({}, status_code=404)
+        if url.endswith("/repos/alex/project-with-readme-api/readme"):
+            encoded = base64.b64encode(
+                b"# Project API\n\nThis project exposes a focused API for portfolio questions."
+            ).decode("utf-8")
+            return FakeResponse({"content": encoded}, status_code=self._readme_status)
         return FakeResponse({}, status_code=404)

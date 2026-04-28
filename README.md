@@ -10,6 +10,7 @@ This implementation's architecture and decision log live in `LANGGRAPH_ARCHITECT
 - history-aware contextual follow-up handling
 - clarification guard rail for genuinely ambiguous follow-up references
 - explicit retrieval planning before answer generation
+- targeted GitHub project deep dives when a query names a specific repository
 - multi-source context merge with bounded context size
 - API session memory via `session_id`
 - CLI and FastAPI transports backed by the same graph runner
@@ -26,6 +27,7 @@ What makes it different:
 - it uses an explicit LangGraph orchestration flow instead of burying behavior inside one prompt
 - it rewrites follow-up questions into standalone queries before planning retrieval
 - it chooses the smallest useful source set before answering instead of always dumping all context into the model
+- it focuses project retrieval on one named repository for deeper project-specific questions
 - it has a clarification guard rail for genuinely ambiguous follow-ups instead of guessing blindly
 - it supports both request/response and SSE streaming while reusing the same core graph runner
 - it keeps the architecture simple enough to extend without turning into an overengineered agent system
@@ -61,6 +63,7 @@ Phase 3 adds first-pass retrieval:
 
 - `projects` from GitHub using `GITHUB_OWNER` and optional `GITHUB_TOKEN`; forks are excluded by default
 - README excerpts are fetched best-effort for each selected repository when available
+- named project questions focus retrieval on the matching repository and use a larger README excerpt budget
 - `resume` and `docs` from local text/markdown files
 - merged context passed into answer generation
 - planned retrieval sources fan out to selected retrievers and then merge before answer generation
@@ -76,7 +79,7 @@ Copy-Item .env.example .env
 
 Fill in `OPENAI_API_KEY`, `ASSISTANT_SUBJECT`, and optionally `GITHUB_OWNER` / `GITHUB_TOKEN` in `.env`.
 
-Project README enrichment is controlled by `GITHUB_README_MAX_CHARS`. Repositories without a README still appear with their normal metadata.
+Project README enrichment is controlled by `GITHUB_README_MAX_CHARS` for broad project lists and `GITHUB_TARGET_README_MAX_CHARS` for focused named-repository retrieval. Repositories without a README still appear with their normal metadata.
 
 For resume-backed answers, add your resume as either:
 

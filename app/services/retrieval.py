@@ -22,7 +22,7 @@ class RetrievalResult(BaseModel):
 
 
 class PortfolioRetrievalService(Protocol):
-    async def retrieve_projects(self) -> RetrievalResult:
+    async def retrieve_projects(self, query: str | None = None) -> RetrievalResult:
         ...
 
     async def retrieve_resume(self, path_override: str | None = None) -> RetrievalResult:
@@ -44,7 +44,7 @@ class ConfiguredPortfolioRetrievalService:
         self._settings = settings
         self._configured_resume_result = _load_default_resume_source()
 
-    async def retrieve_projects(self) -> RetrievalResult:
+    async def retrieve_projects(self, query: str | None = None) -> RetrievalResult:
         if not self._settings.github_owner:
             return RetrievalResult(
                 source=RetrievalSource.PROJECTS,
@@ -62,7 +62,7 @@ class ConfiguredPortfolioRetrievalService:
         params = {
             "sort": "updated",
             "direction": "desc",
-            "per_page": min(self._settings.github_projects_limit, 100),
+            "per_page": 100,
         }
 
         try:
@@ -83,6 +83,21 @@ class ConfiguredPortfolioRetrievalService:
                     return RetrievalResult(
                         source=RetrievalSource.PROJECTS,
                         content=f"No non-fork repositories were found for GitHub owner {self._settings.github_owner}.",
+                    )
+
+                target_repo = _find_target_repository(query, repos)
+                if target_repo:
+                    readmes = await _fetch_repository_readmes(
+                        client=client,
+                        api_base_url=self._settings.github_api_base_url,
+                        owner=self._settings.github_owner,
+                        headers=headers,
+                        repos=[target_repo],
+                        max_chars=self._settings.github_target_readme_max_chars,
+                    )
+                    return RetrievalResult(
+                        source=RetrievalSource.PROJECTS,
+                        content=_format_repositories([target_repo], readmes, focused=True),
                     )
 
                 selected_repos = repos[: self._settings.github_projects_limit]
@@ -229,9 +244,45 @@ async def _fetch_repository_readme(
     return normalized[:max_chars].rstrip()
 
 
-def _format_repositories(repos: list[dict], readmes: dict[str, str] | None = None) -> str:
+def _find_target_repository(query: str | None, repos: list[dict]) -> dict | None:
+    if not query:
+        return None
+
+    normalized_query = _normalize_repo_match_text(query)
+    matches: list[dict] = []
+    for repo in repos:
+        name = repo.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        normalized_name = _normalize_repo_match_text(name)
+        if name.lower() in query.lower() or normalized_name in normalized_query:
+            matches.append(repo)
+
+    if not matches:
+        return None
+
+    matches.sort(key=lambda repo: len(repo.get("name", "")), reverse=True)
+    if len(matches) == 1:
+        return matches[0]
+
+    longest = len(matches[0].get("name", ""))
+    second_longest = len(matches[1].get("name", ""))
+    if longest > second_longest:
+        return matches[0]
+    return None
+
+
+def _normalize_repo_match_text(value: str) -> str:
+    return " ".join(token for token in _split_repo_match_text(value) if token)
+
+
+def _split_repo_match_text(value: str) -> list[str]:
+    return value.lower().replace("-", " ").replace("_", " ").replace(".", " ").split()
+
+
+def _format_repositories(repos: list[dict], readmes: dict[str, str] | None = None, focused: bool = False) -> str:
     readmes = readmes or {}
-    sections = ["GitHub projects:"]
+    sections = ["Focused GitHub project:" if focused else "GitHub projects:"]
     for repo in repos:
         name = repo.get("name") or "unnamed"
         description = repo.get("description") or "No description provided."
