@@ -2,6 +2,7 @@ import logging
 import unicodedata
 from pathlib import Path
 from typing import Protocol
+import base64
 
 import httpx
 from pydantic import BaseModel
@@ -68,31 +69,40 @@ class ConfiguredPortfolioRetrievalService:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.get(url, headers=headers, params=params)
                 response.raise_for_status()
+                repos = response.json()
+                if not isinstance(repos, list) or not repos:
+                    return RetrievalResult(
+                        source=RetrievalSource.PROJECTS,
+                        content=f"No public repositories were found for GitHub owner {self._settings.github_owner}.",
+                    )
+
+                if not self._settings.github_include_forks:
+                    repos = [repo for repo in repos if not repo.get("fork", False)]
+
+                if not repos:
+                    return RetrievalResult(
+                        source=RetrievalSource.PROJECTS,
+                        content=f"No non-fork repositories were found for GitHub owner {self._settings.github_owner}.",
+                    )
+
+                selected_repos = repos[: self._settings.github_projects_limit]
+                readmes = await _fetch_repository_readmes(
+                    client=client,
+                    api_base_url=self._settings.github_api_base_url,
+                    owner=self._settings.github_owner,
+                    headers=headers,
+                    repos=selected_repos,
+                    max_chars=self._settings.github_readme_max_chars,
+                )
         except httpx.HTTPError as exc:
             return RetrievalResult(
                 source=RetrievalSource.PROJECTS,
                 error=f"GitHub project retrieval failed: {exc}",
             )
 
-        repos = response.json()
-        if not isinstance(repos, list) or not repos:
-            return RetrievalResult(
-                source=RetrievalSource.PROJECTS,
-                content=f"No public repositories were found for GitHub owner {self._settings.github_owner}.",
-            )
-
-        if not self._settings.github_include_forks:
-            repos = [repo for repo in repos if not repo.get("fork", False)]
-
-        if not repos:
-            return RetrievalResult(
-                source=RetrievalSource.PROJECTS,
-                content=f"No non-fork repositories were found for GitHub owner {self._settings.github_owner}.",
-            )
-
         return RetrievalResult(
             source=RetrievalSource.PROJECTS,
-            content=_format_repositories(repos[: self._settings.github_projects_limit]),
+            content=_format_repositories(selected_repos, readmes),
         )
 
     async def retrieve_resume(self, path_override: str | None = None) -> RetrievalResult:
@@ -159,7 +169,68 @@ def _log_resume_preload_result(source: str, result: RetrievalResult) -> None:
     logger.warning("resume preload skipped | source=%s | reason=%s", source, result.error)
 
 
-def _format_repositories(repos: list[dict]) -> str:
+async def _fetch_repository_readmes(
+    client: httpx.AsyncClient,
+    api_base_url: str,
+    owner: str,
+    headers: dict[str, str],
+    repos: list[dict],
+    max_chars: int,
+) -> dict[str, str]:
+    readmes: dict[str, str] = {}
+    for repo in repos:
+        name = repo.get("name")
+        if not name:
+            continue
+        readme = await _fetch_repository_readme(
+            client=client,
+            api_base_url=api_base_url,
+            owner=owner,
+            repo=name,
+            headers=headers,
+            max_chars=max_chars,
+        )
+        if readme:
+            readmes[name] = readme
+    return readmes
+
+
+async def _fetch_repository_readme(
+    client: httpx.AsyncClient,
+    api_base_url: str,
+    owner: str,
+    repo: str,
+    headers: dict[str, str],
+    max_chars: int,
+) -> str:
+    url = f"{api_base_url.rstrip('/')}/repos/{owner}/{repo}/readme"
+    try:
+        response = await client.get(url, headers=headers)
+        if response.status_code == 404:
+            return ""
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        logger.debug("GitHub README retrieval skipped | repo=%s | reason=%s", repo, exc)
+        return ""
+
+    payload = response.json()
+    encoded_content = payload.get("content")
+    if not isinstance(encoded_content, str):
+        return ""
+
+    try:
+        decoded = base64.b64decode(encoded_content, validate=False).decode("utf-8", errors="replace")
+    except ValueError:
+        return ""
+
+    normalized = _normalize_text_content(decoded)
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[:max_chars].rstrip()
+
+
+def _format_repositories(repos: list[dict], readmes: dict[str, str] | None = None) -> str:
+    readmes = readmes or {}
     sections = ["GitHub projects:"]
     for repo in repos:
         name = repo.get("name") or "unnamed"
@@ -186,5 +257,11 @@ def _format_repositories(repos: list[dict]) -> str:
             f"  Metadata: {'; '.join(metadata)}\n"
             f"  URL: {url}"
         )
+        if readme := readmes.get(name):
+            sections.append(f"  README excerpt:\n{_indent_readme_excerpt(readme)}")
 
     return "\n".join(sections)
+
+
+def _indent_readme_excerpt(readme: str) -> str:
+    return "\n".join(f"    {line}" for line in readme.splitlines())

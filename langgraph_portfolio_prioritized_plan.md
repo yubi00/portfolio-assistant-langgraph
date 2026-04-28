@@ -88,7 +88,7 @@ Notes:
 Status: complete for first retrieval-node implementation.
 
 Notes:
-- `projects` uses GitHub REST API.
+- `projects` uses GitHub REST API and best-effort README enrichment.
 - Work-experience answers use the `resume` source because the resume already contains employment history.
 - The app auto-loads `data/resume.md` or `data/resume.pdf` by default.
 - CLI supports `--resume-path` only as a one-off testing override.
@@ -221,7 +221,8 @@ Guiding principle:
 
 ### Near-Term: High Impact, Lower Complexity
 
-- SHOULD [ ] Enrich `projects` retrieval with README content and featured project detail
+- SHOULD [x] Enrich `projects` retrieval with README content
+- SHOULD [ ] Add featured project detail
 - SHOULD [ ] Add relevance scoring/ranking so project answers prefer the best-matching projects instead of mostly recent repositories
 - SHOULD [ ] Make resume retrieval section-aware for skills, work history, education, and certifications
 - SHOULD [x] Add clarification behavior for ambiguous follow-up questions instead of guessing

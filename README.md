@@ -60,6 +60,7 @@ Portfolio queries now pass through a planning node before answer generation. The
 Phase 3 adds first-pass retrieval:
 
 - `projects` from GitHub using `GITHUB_OWNER` and optional `GITHUB_TOKEN`; forks are excluded by default
+- README excerpts are fetched best-effort for each selected repository when available
 - `resume` and `docs` from local text/markdown files
 - merged context passed into answer generation
 - planned retrieval sources fan out to selected retrievers and then merge before answer generation
@@ -74,6 +75,8 @@ Copy-Item .env.example .env
 ```
 
 Fill in `OPENAI_API_KEY`, `ASSISTANT_SUBJECT`, and optionally `GITHUB_OWNER` / `GITHUB_TOKEN` in `.env`.
+
+Project README enrichment is controlled by `GITHUB_README_MAX_CHARS`. Repositories without a README still appear with their normal metadata.
 
 For resume-backed answers, add your resume as either:
 
