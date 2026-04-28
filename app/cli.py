@@ -2,7 +2,7 @@ import argparse
 import asyncio
 from collections.abc import Sequence
 
-from app.config import SettingsError, require_settings
+from app.config import Settings, SettingsError, require_settings
 from app.logging_config import configure_logging
 from app.schemas import ConversationTurn, PromptRequest, PromptResponse
 from app.services.prompt_runner import run_prompt
@@ -60,6 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def run_once(
+    settings: Settings,
     prompt: str,
     subject: str | None,
     context: str | None,
@@ -74,12 +75,13 @@ async def run_once(
         resume_path=resume_path,
         docs_path=docs_path,
     )
-    response = await run_prompt(request, get_settings())
+    response = await run_prompt(request, settings)
     _print_response(response, show_trace)
     return response
 
 
 async def run_interactive(
+    settings: Settings,
     subject: str | None,
     context: str | None,
     resume_path: str | None,
@@ -110,7 +112,7 @@ async def run_interactive(
             resume_path=resume_path,
             docs_path=docs_path,
         )
-        response = await run_prompt(request, get_settings())
+        response = await run_prompt(request, settings)
         _print_response(response, show_trace)
         history = response.history
 
@@ -132,9 +134,28 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         if prompt:
-            asyncio.run(run_once(prompt, args.subject, args.context, args.resume_path, args.docs_path, args.show_trace))
+            asyncio.run(
+                run_once(
+                    settings,
+                    prompt,
+                    args.subject,
+                    args.context,
+                    args.resume_path,
+                    args.docs_path,
+                    args.show_trace,
+                )
+            )
         else:
-            asyncio.run(run_interactive(args.subject, args.context, args.resume_path, args.docs_path, args.show_trace))
+            asyncio.run(
+                run_interactive(
+                    settings,
+                    args.subject,
+                    args.context,
+                    args.resume_path,
+                    args.docs_path,
+                    args.show_trace,
+                )
+            )
     except KeyboardInterrupt:
         print(SESSION_END_MESSAGE)
         return EXIT_SUCCESS if not prompt else EXIT_KEYBOARD_INTERRUPT

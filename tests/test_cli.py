@@ -34,7 +34,7 @@ def test_build_parser_accepts_one_shot_prompt():
 
 
 def test_main_runs_one_shot_prompt(monkeypatch, capsys):
-    async def fake_run_once(prompt, subject, context, resume_path, docs_path, show_trace):
+    async def fake_run_once(settings, prompt, subject, context, resume_path, docs_path, show_trace):
         response = PromptResponse(
             answer=f"answer: {prompt}",
             session_id=None,
