@@ -5,7 +5,7 @@ from langgraph.graph import END, START, StateGraph
 from app.config import get_settings
 from app.graph.constants import NodeName, RouteName
 from app.graph.nodes import PortfolioGraphNodes
-from app.graph.routing import route_after_relevance, route_to_retrievers
+from app.graph.routing import route_after_ambiguity, route_after_relevance, route_to_retrievers
 from app.graph.state import PortfolioState
 from app.services.assistant import AssistantService
 from app.services.openai_client import OpenAIAssistantClient
@@ -29,12 +29,14 @@ def build_portfolio_graph(
     builder.add_node(NodeName.INGEST_USER_MESSAGE, nodes.ingest_user_message)
     builder.add_node(NodeName.RESOLVE_CONTEXT, nodes.resolve_context)
     builder.add_node(NodeName.CLASSIFY_RELEVANCE, nodes.classify_relevance)
+    builder.add_node(NodeName.CHECK_AMBIGUITY, nodes.check_ambiguity)
     builder.add_node(NodeName.PLAN_RETRIEVAL, nodes.plan_retrieval)
     builder.add_node(NodeName.RETRIEVE_PROJECTS, nodes.retrieve_projects)
     builder.add_node(NodeName.RETRIEVE_RESUME, nodes.retrieve_resume)
     builder.add_node(NodeName.RETRIEVE_DOCS, nodes.retrieve_docs)
     builder.add_node(NodeName.MERGE_NORMALIZE_CONTEXT, nodes.merge_normalize_context)
     builder.add_node(NodeName.GENERATE_ANSWER, nodes.generate_answer)
+    builder.add_node(NodeName.CLARIFICATION_RESPONSE, nodes.clarification_response)
     builder.add_node(NodeName.FRIENDLY_RESPONSE, nodes.friendly_response)
     builder.add_node(NodeName.SAVE_MEMORY, nodes.save_memory)
 
@@ -45,8 +47,16 @@ def build_portfolio_graph(
         NodeName.CLASSIFY_RELEVANCE,
         route_after_relevance,
         {
-            RouteName.PORTFOLIO_QUERY: NodeName.PLAN_RETRIEVAL,
+            RouteName.PORTFOLIO_QUERY: NodeName.CHECK_AMBIGUITY,
             RouteName.OFF_TOPIC: NodeName.FRIENDLY_RESPONSE,
+        },
+    )
+    builder.add_conditional_edges(
+        NodeName.CHECK_AMBIGUITY,
+        route_after_ambiguity,
+        {
+            NodeName.PLAN_RETRIEVAL: NodeName.PLAN_RETRIEVAL,
+            NodeName.CLARIFICATION_RESPONSE: NodeName.CLARIFICATION_RESPONSE,
         },
     )
     builder.add_conditional_edges(NodeName.PLAN_RETRIEVAL, route_to_retrievers)
@@ -55,6 +65,7 @@ def build_portfolio_graph(
     builder.add_edge(NodeName.RETRIEVE_DOCS, NodeName.MERGE_NORMALIZE_CONTEXT)
     builder.add_edge(NodeName.MERGE_NORMALIZE_CONTEXT, NodeName.GENERATE_ANSWER)
     builder.add_edge(NodeName.GENERATE_ANSWER, NodeName.SAVE_MEMORY)
+    builder.add_edge(NodeName.CLARIFICATION_RESPONSE, NodeName.SAVE_MEMORY)
     builder.add_edge(NodeName.FRIENDLY_RESPONSE, NodeName.SAVE_MEMORY)
     builder.add_edge(NodeName.SAVE_MEMORY, END)
 

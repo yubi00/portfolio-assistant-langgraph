@@ -20,6 +20,8 @@ class PortfolioState(TypedDict):
     rewritten_query: NotRequired[str]
     messages: NotRequired[list[ConversationTurnState]]
     assistant_subject: NotRequired[str]
+    needs_clarification: NotRequired[bool]
+    clarification_question: NotRequired[str]
     portfolio_context: NotRequired[str]
     resume_path: NotRequired[str]
     docs_path: NotRequired[str]

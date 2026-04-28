@@ -212,6 +212,59 @@ Status: partially complete. OpenAI-backed graph steps now use configurable timeo
 
 ---
 
+## Smartness Roadmap
+
+This section tracks capability upgrades that make the assistant materially smarter without adding unnecessary orchestration complexity.
+
+Guiding principle:
+- prefer better retrieval quality and evidence selection before adding heavier agent loops or memory systems
+
+### Near-Term: High Impact, Lower Complexity
+
+- SHOULD [ ] Enrich `projects` retrieval with README content and featured project detail
+- SHOULD [ ] Add relevance scoring/ranking so project answers prefer the best-matching projects instead of mostly recent repositories
+- SHOULD [ ] Make resume retrieval section-aware for skills, work history, education, and certifications
+- SHOULD [x] Add clarification behavior for ambiguous follow-up questions instead of guessing
+
+Expected value:
+- improves answer quality directly
+- makes project and skills answers feel much smarter without changing the graph shape much
+
+### Mid-Term: High Impact, Moderate Complexity
+
+- SHOULD [ ] Add deduplication and evidence selection across multi-source context
+- SHOULD [ ] Add deeper project drill-down retrieval for one selected repository
+- SHOULD [ ] Support query-specific source expansion when one source is clearly insufficient
+- SHOULD [ ] Add structured answer modes for concise vs detailed responses
+
+Expected value:
+- improves depth, evidence quality, and consistency
+- makes the assistant better at project-specific discussion instead of only broad summaries
+
+### Later: Advanced Capability Upgrades
+
+- NICE [ ] Add richer long-form docs ingestion and selective RAG for larger document sets
+- NICE [ ] Add entity/topic memory beyond bounded chat history
+- NICE [ ] Add evaluation datasets for answer quality and retrieval quality
+- NICE [ ] Add external tracing/evaluation tooling such as LangSmith when local observability is no longer enough
+- NICE [ ] Explore deeper agent/tool behaviors only after retrieval quality is strong
+
+Expected value:
+- improves scale, long-term maintainability, and systematic quality measurement
+- should be sequenced after retrieval quality improvements, not before them
+
+### Recommended Implementation Order
+
+1. README/project-detail retrieval
+2. Project relevance scoring/ranking
+3. Resume section-aware retrieval
+4. Clarification behavior for ambiguity
+5. Project deep-dive retrieval path
+6. Deduplication/evidence selection
+7. Larger-doc RAG only when needed
+
+---
+
 ## Success Criteria
 
 - MUST [x] End-to-end minimal graph works

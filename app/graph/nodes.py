@@ -1,3 +1,5 @@
+import re
+
 from app.config import Settings
 from app.graph.constants import NodeName, RetrievalSource
 from app.graph.observability import log_node, skipped_update
@@ -57,6 +59,29 @@ class PortfolioGraphNodes:
             "intent": decision.intent,
             "route": decision.route,
             "node_trace": [NodeName.CLASSIFY_RELEVANCE],
+        }
+
+    @log_node(NodeName.CHECK_AMBIGUITY)
+    async def check_ambiguity(self, state: PortfolioState) -> dict:
+        candidate_entries = _extract_recent_list_candidates(state.get("messages", []))
+        candidates = [entry["name"] for entry in candidate_entries]
+        if not _is_ambiguous_reference(state["rewritten_query"]) or len(candidates) < 2:
+            return {
+                "needs_clarification": False,
+                "node_trace": [NodeName.CHECK_AMBIGUITY],
+            }
+
+        if _resolve_unique_candidate_from_query(state["rewritten_query"], candidate_entries):
+            return {
+                "needs_clarification": False,
+                "node_trace": [NodeName.CHECK_AMBIGUITY],
+            }
+
+        clarification_question = _build_clarification_question(state["rewritten_query"], candidates)
+        return {
+            "needs_clarification": True,
+            "clarification_question": clarification_question,
+            "node_trace": [NodeName.CHECK_AMBIGUITY],
         }
 
     @log_node(NodeName.PLAN_RETRIEVAL)
@@ -130,6 +155,13 @@ class PortfolioGraphNodes:
             "node_trace": [NodeName.GENERATE_ANSWER],
         }
 
+    @log_node(NodeName.CLARIFICATION_RESPONSE)
+    async def clarification_response(self, state: PortfolioState) -> dict:
+        return {
+            "final_answer": state.get("clarification_question", "Can you clarify which project or role you mean?"),
+            "node_trace": [NodeName.CLARIFICATION_RESPONSE],
+        }
+
     @log_node(NodeName.FRIENDLY_RESPONSE)
     async def friendly_response(self, state: PortfolioState) -> dict:
         answer = self._assistant_service.build_friendly_response(
@@ -168,3 +200,157 @@ def _result_update(result: RetrievalResult, context_key: str, node_name: NodeNam
     if result.error:
         update["retrieval_errors"] = [result.error]
     return update
+
+
+AMBIGUOUS_REFERENCE_PATTERNS = (
+    re.compile(r"\b(first|second|third)\s+(one|project|role)\b", re.IGNORECASE),
+    re.compile(r"\b(this|that)\s+(project|role|one)\b", re.IGNORECASE),
+    re.compile(r"\b(previous|earlier)\s+(project|role|one)\b", re.IGNORECASE),
+    re.compile(r"\b(mentioned above|above)\b", re.IGNORECASE),
+)
+LIST_ITEM_PATTERNS = (
+    re.compile(r"^\s*(?:\d+\.|-)\s+\*\*(.+?)\*\*", re.MULTILINE),
+    re.compile(r'^\s*(?:\d+\.|-)\s+"([^"]+)"', re.MULTILINE),
+    re.compile(r"^\s*(?:\d+\.|-)\s+([A-Za-z0-9][A-Za-z0-9 ._-]{1,60}?)(?:\s*[:-]|\s*$)", re.MULTILINE),
+)
+STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "from",
+    "into",
+    "your",
+    "have",
+    "about",
+    "more",
+    "details",
+    "project",
+    "mentioned",
+    "provide",
+    "what",
+    "which",
+    "tool",
+    "using",
+    "used",
+}
+
+
+def _is_ambiguous_reference(query: str) -> bool:
+    return any(pattern.search(query) for pattern in AMBIGUOUS_REFERENCE_PATTERNS)
+
+
+def _extract_recent_list_candidates(messages: list[dict]) -> list[dict[str, str]]:
+    for turn in reversed(messages):
+        assistant_text = turn.get("assistant", "")
+        candidates = _extract_list_candidates(assistant_text)
+        if len(candidates) >= 2:
+            return candidates
+    return []
+
+
+def _extract_list_candidates(text: str) -> list[dict[str, str]]:
+    candidates = _extract_numbered_candidate_entries(text)
+    if candidates:
+        return candidates
+
+    seen: set[str] = set()
+    fallback_candidates: list[dict[str, str]] = []
+    for pattern in LIST_ITEM_PATTERNS:
+        for match in pattern.findall(text):
+            candidate = match.strip().strip(" .,:;!?")
+            if len(candidate) < 2:
+                continue
+            lowered = candidate.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            fallback_candidates.append({"name": candidate, "details": ""})
+    return fallback_candidates
+
+
+def _extract_numbered_candidate_entries(text: str) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    lines = text.splitlines()
+    current_name: str | None = None
+    current_details: list[str] = []
+
+    def flush() -> None:
+        nonlocal current_name, current_details
+        if current_name:
+            entries.append(
+                {
+                    "name": current_name,
+                    "details": " ".join(detail.strip() for detail in current_details if detail.strip()),
+                }
+            )
+        current_name = None
+        current_details = []
+
+    for line in lines:
+        stripped = line.strip()
+        numbered_match = re.match(r"^\d+\.\s+\*\*(.+?)\*\*", stripped)
+        if numbered_match:
+            flush()
+            current_name = numbered_match.group(1).strip()
+            continue
+        if current_name and stripped.startswith("-"):
+            current_details.append(stripped.lstrip("-").strip())
+            continue
+        if current_name and not stripped:
+            continue
+        if current_name:
+            flush()
+
+    flush()
+    return entries
+
+
+def _resolve_unique_candidate_from_query(query: str, candidates: list[dict[str, str]]) -> str | None:
+    normalized_query = query.lower()
+
+    name_matches = [candidate["name"] for candidate in candidates if candidate["name"].lower() in normalized_query]
+    if len(name_matches) == 1:
+        return name_matches[0]
+
+    query_tokens = _meaningful_tokens(query)
+    if not query_tokens:
+        return None
+
+    scored_candidates: list[tuple[str, int]] = []
+    for candidate in candidates:
+        candidate_tokens = _meaningful_tokens(f"{candidate['name']} {candidate['details']}")
+        overlap = len(query_tokens & candidate_tokens)
+        if overlap:
+            scored_candidates.append((candidate["name"], overlap))
+
+    if not scored_candidates:
+        return None
+
+    scored_candidates.sort(key=lambda item: item[1], reverse=True)
+    best_name, best_score = scored_candidates[0]
+    if best_score < 2:
+        return None
+    if len(scored_candidates) > 1 and scored_candidates[1][1] == best_score:
+        return None
+    return best_name
+
+
+def _meaningful_tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", text.lower())
+        if len(token) >= 3 and token not in STOPWORDS
+    }
+
+
+def _build_clarification_question(query: str, candidates: list[str]) -> str:
+    subject = "role" if "role" in query.lower() else "project"
+    options = candidates[:3]
+    if len(options) == 2:
+        options_text = f"{options[0]} or {options[1]}"
+    else:
+        options_text = ", ".join(options[:-1]) + f", or {options[-1]}"
+    return f"Which {subject} do you mean: {options_text}?"

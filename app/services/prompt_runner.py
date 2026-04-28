@@ -126,12 +126,14 @@ def _merge_stream_updates(state_updates: dict, updates: dict) -> None:
 PROGRESS_STEP_BY_NODE = {
     NodeName.RESOLVE_CONTEXT.value: "context_resolved",
     NodeName.CLASSIFY_RELEVANCE.value: "relevance_classified",
+    NodeName.CHECK_AMBIGUITY.value: "ambiguity_checked",
     NodeName.PLAN_RETRIEVAL.value: "retrieval_planned",
     NodeName.RETRIEVE_PROJECTS.value: "projects_retrieved",
     NodeName.RETRIEVE_RESUME.value: "resume_retrieved",
     NodeName.RETRIEVE_DOCS.value: "docs_retrieved",
     NodeName.MERGE_NORMALIZE_CONTEXT.value: "context_merged",
     NodeName.GENERATE_ANSWER.value: "answer_started",
+    NodeName.CLARIFICATION_RESPONSE.value: "answer_started",
     NodeName.FRIENDLY_RESPONSE.value: "answer_started",
     NodeName.SAVE_MEMORY.value: "memory_saved",
 }

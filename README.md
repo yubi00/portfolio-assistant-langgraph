@@ -4,12 +4,38 @@ LangGraph-powered implementation of a generic portfolio assistant.
 
 This implementation's architecture and decision log live in `LANGGRAPH_ARCHITECTURE.md`.
 
+## Main Features
+
+- grounded portfolio Q&A across `projects`, `resume`, and `docs`
+- history-aware contextual follow-up handling
+- clarification guard rail for genuinely ambiguous follow-up references
+- explicit retrieval planning before answer generation
+- multi-source context merge with bounded context size
+- API session memory via `session_id`
+- CLI and FastAPI transports backed by the same graph runner
+- SSE streaming via `POST /prompt/stream`
+- request/session-aware logging with optional JSON log format
+- basic upstream reliability controls with retries, timeouts, and streaming partial-answer preservation
+
+## What Makes It Special
+
+This assistant is not just a single-prompt chatbot over a resume.
+
+What makes it different:
+
+- it uses an explicit LangGraph orchestration flow instead of burying behavior inside one prompt
+- it rewrites follow-up questions into standalone queries before planning retrieval
+- it chooses the smallest useful source set before answering instead of always dumping all context into the model
+- it has a clarification guard rail for genuinely ambiguous follow-ups instead of guessing blindly
+- it supports both request/response and SSE streaming while reusing the same core graph runner
+- it keeps the architecture simple enough to extend without turning into an overengineered agent system
+
 ## Current Scope
 
 - FastAPI application
 - `uv` project setup
 - LangGraph `StateGraph`
-- Nodes for ingest, context resolution, relevance classification, retrieval planning, retrieval, context merge, answer generation, and friendly off-topic responses
+- Nodes for ingest, context resolution, relevance classification, ambiguity checking, retrieval planning, retrieval, context merge, answer generation, clarification response, and friendly off-topic responses
 - Conditional routing for portfolio and off-topic prompts
 - Real OpenAI calls through `langchain-openai`
 - File-backed system prompts under `app/prompts/`
@@ -71,6 +97,8 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/prompt `
 API session memory is now available through `session_id`. Omit it on the first request, then reuse the returned `session_id` on follow-up requests.
 
 The current memory model is a bounded app-level session store. LangGraph checkpointers were evaluated and intentionally deferred because this repo currently only needs short-term conversational memory, not durable thread persistence.
+
+Ambiguous follow-up questions now have a lightweight clarification guard rail. If context resolution cannot safely identify one target from recent history, the assistant asks a short clarification question instead of guessing.
 
 Streaming is available through `POST /prompt/stream` using Server-Sent Events (SSE).
 

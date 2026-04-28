@@ -14,6 +14,11 @@ class FakeAssistantService:
     async def resolve_context(self, query, history):
         if not history:
             return query
+        if "third project you mentioned" in query.lower():
+            return (
+                "Can you provide more details about the third project you mentioned, "
+                "the AI-powered audio match analysis tool for the Premier League?"
+            )
         return (
             query.replace("the first one", "the first project")
             .replace("this project", "the matchcast project")
@@ -97,6 +102,7 @@ async def test_relevant_query_routes_to_generate_answer():
         "ingest_user_message",
         "resolve_context",
         "classify_relevance",
+        "check_ambiguity",
         "plan_retrieval",
         "retrieve_projects",
         "merge_normalize_context",
@@ -129,6 +135,12 @@ async def test_context_resolution_handles_this_project_follow_up():
         "user": "How did you deploy this project?",
         "assistant": "Grounded answer for Alex: How did you deploy the matchcast project?",
     }
+    assert result["node_trace"][:4] == [
+        "ingest_user_message",
+        "resolve_context",
+        "classify_relevance",
+        "check_ambiguity",
+    ]
 
 
 async def test_irrelevant_query_routes_to_friendly_response():
@@ -177,6 +189,7 @@ async def test_identity_query_routes_through_resume_retrieval():
         "ingest_user_message",
         "resolve_context",
         "classify_relevance",
+        "check_ambiguity",
         "plan_retrieval",
         "retrieve_resume",
         "merge_normalize_context",
@@ -230,12 +243,78 @@ async def test_skill_query_can_plan_multiple_sources():
         "ingest_user_message",
         "resolve_context",
         "classify_relevance",
-        "plan_retrieval",
+        "check_ambiguity",
     ]
+    assert result["node_trace"][4] == "plan_retrieval"
     assert "retrieve_projects" in result["node_trace"]
     assert "retrieve_resume" in result["node_trace"]
     assert "retrieve_docs" not in result["node_trace"]
     assert result["node_trace"][-3:] == ["merge_normalize_context", "generate_answer", "save_memory"]
+
+
+async def test_ambiguous_project_reference_returns_clarification():
+    graph = build_portfolio_graph(FakeAssistantService(), FakeRetrievalService(), settings=_test_settings())
+
+    result = await graph.ainvoke(
+        {
+            "user_query": "Tell me more about the second project",
+            "messages": [
+                {
+                    "user": "What projects has Alex built?",
+                    "assistant": "1. **matchcast**\n2. **ai-portfolio-voice-service**",
+                }
+            ],
+            "assistant_subject": "Alex",
+        }
+    )
+
+    assert result["needs_clarification"] is True
+    assert (
+        result["final_answer"]
+        == "Which project do you mean: matchcast or ai-portfolio-voice-service?"
+    )
+    assert result.get("retrieval_sources") is None
+    assert result["node_trace"] == [
+        "ingest_user_message",
+        "resolve_context",
+        "classify_relevance",
+        "check_ambiguity",
+        "clarification_response",
+        "save_memory",
+    ]
+    assert result["messages"][-1] == {
+        "user": "Tell me more about the second project",
+        "assistant": "Which project do you mean: matchcast or ai-portfolio-voice-service?",
+    }
+
+
+async def test_descriptive_rewritten_query_skips_unnecessary_clarification():
+    graph = build_portfolio_graph(FakeAssistantService(), FakeRetrievalService(), settings=_test_settings())
+
+    result = await graph.ainvoke(
+        {
+            "user_query": "Tell me more about the third project you mentioned?",
+            "messages": [
+                {
+                    "user": "What projects has Alex built?",
+                    "assistant": (
+                        "1. **ai-portfolio-voice-service**\n"
+                        "- A 1:1 audio conversation system with an AI version of me.\n"
+                        "2. **ai-portfolio**\n"
+                        "- A terminal-style AI portfolio website.\n"
+                        "3. **matchcast**\n"
+                        "- An AI-powered audio match analysis tool for the Premier League."
+                    ),
+                }
+            ],
+            "assistant_subject": "Alex",
+        }
+    )
+
+    assert result["needs_clarification"] is False
+    assert result["retrieval_sources"] == ["projects"]
+    assert result["final_answer"].startswith("Grounded answer for Alex:")
+    assert "clarification_response" not in result["node_trace"]
 
 
 async def test_graph_logs_include_request_id(caplog):

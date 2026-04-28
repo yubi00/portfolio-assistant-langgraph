@@ -19,6 +19,27 @@ def route_after_relevance(state: PortfolioState) -> Literal["portfolio_query", "
     return RouteName.OFF_TOPIC
 
 
+def route_after_ambiguity(state: PortfolioState) -> Literal["plan_retrieval", "clarification_response"]:
+    if state.get("needs_clarification"):
+        logger.info(
+            "=> %-22s | destination=%s%s%s",
+            "edge ambiguity",
+            NodeName.CLARIFICATION_RESPONSE.value,
+            f" | request_id={state['request_id']}" if state.get("request_id") else "",
+            f" | session_id={state['session_id']}" if state.get("session_id") else "",
+        )
+        return NodeName.CLARIFICATION_RESPONSE
+
+    logger.info(
+        "=> %-22s | destination=%s%s%s",
+        "edge ambiguity",
+        NodeName.PLAN_RETRIEVAL.value,
+        f" | request_id={state['request_id']}" if state.get("request_id") else "",
+        f" | session_id={state['session_id']}" if state.get("session_id") else "",
+    )
+    return NodeName.PLAN_RETRIEVAL
+
+
 def _log_route(route: RouteName, state: PortfolioState) -> None:
     request_fragment = f" | request_id={state['request_id']}" if state.get("request_id") else ""
     session_fragment = f" | session_id={state['session_id']}" if state.get("session_id") else ""

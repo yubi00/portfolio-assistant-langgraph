@@ -16,6 +16,7 @@ Implemented phases:
 - Phase 3A: retrieval nodes, GitHub project retrieval, local resume/docs retrieval, and context merging
 - Phase 6A/B: API session contract, app-level session store, explicit `save_memory` graph step, and checkpointer evaluation
 - Phase 8A: SSE streaming route reusing the existing prompt runner and graph-level answer-token streaming
+- Clarification guard rail: deterministic ambiguity detection for risky follow-up references
 
 Not implemented yet:
 
@@ -72,8 +73,11 @@ flowchart TD
     Ingest --> Resolve[resolve_context]
     Resolve --> Classify[classify_relevance]
 
-    Classify -->|portfolio_query| Plan[plan_retrieval]
+    Classify -->|portfolio_query| Ambiguity[check_ambiguity]
     Classify -->|off_topic| Friendly[friendly_response]
+
+    Ambiguity -->|clear| Plan[plan_retrieval]
+    Ambiguity -->|ambiguous| Clarify[clarification_response]
 
     Plan -. selected .-> Projects[retrieve_projects]
     Plan -. selected .-> Resume[retrieve_resume]
@@ -83,6 +87,7 @@ flowchart TD
     Docs --> Merge
     Merge --> Answer[generate_answer]
     Answer --> Save[save_memory]
+    Clarify --> Save
     Friendly --> Save
     Save --> END([END])
 ```
@@ -194,6 +199,24 @@ Problem solved: follow-up handling is not limited to phrases we anticipated in c
 The default history window is 4 turns. This is wide enough for references like "the second project mentioned above" after a short side discussion, while still bounding prompt size.
 
 Trade-off: every follow-up with history incurs one extra LLM call, and a wider history window sends more tokens. If latency or cost becomes an issue, this can be optimized with a cheaper model, caching, or a combined context-resolution/classification step.
+
+---
+
+## Clarification Guard Rail
+
+`check_ambiguity` sits between relevance classification and retrieval planning.
+
+Current behavior:
+
+- if the rewritten query is clear enough, the graph continues to `plan_retrieval`
+- if the rewritten query still contains a risky ambiguous reference and recent assistant history contains multiple plausible list candidates, the graph asks a short clarification question instead of guessing
+- if the rewritten query contains enough descriptive evidence to uniquely match one candidate, clarification is skipped
+
+Decision: keep ambiguity handling deterministic and narrow instead of adding another LLM call.
+
+Problem solved: the assistant avoids wrong confident guesses in follow-up edge cases while still trusting successful context resolution.
+
+Trade-off: this guard rail is intentionally conservative in scope and should trigger rarely. It is not meant to replace context resolution; it exists as a safety check when context resolution cannot safely recover one target.
 
 ---
 
@@ -453,6 +476,18 @@ Trade-off: the current error wrapping is intentionally narrow and focused on the
 
 ---
 
+### 18. Add A Clarification Guard Rail For Ambiguous Follow-Ups
+
+Problem: history-aware query rewriting works well most of the time, but some follow-up questions can still remain risky if multiple recent list items plausibly match and the assistant would otherwise guess.
+
+Decision: add a deterministic `check_ambiguity` node between relevance classification and retrieval planning. It only asks for clarification when the rewritten query still looks ambiguous and recent assistant history contains multiple plausible candidates that cannot be uniquely resolved from the rewritten query.
+
+Problem solved: the assistant can stop and ask a short clarification question instead of producing a wrong confident answer in edge cases.
+
+Trade-off: this adds one more branch to the graph, but keeps the behavior simple, explicit, and rare. The guard rail is intentionally narrower than full agentic disambiguation and should only trigger when resolution is genuinely unsafe.
+
+---
+
 ## Current Runtime Examples
 
 Assistant identity:
@@ -464,7 +499,7 @@ uv run portfolio-assistant "who are you" --show-trace
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> classify_relevance -> plan_retrieval -> retrieve_resume -> merge_normalize_context -> generate_answer -> save_memory
+ingest_user_message -> resolve_context -> classify_relevance -> check_ambiguity -> plan_retrieval -> retrieve_resume -> merge_normalize_context -> generate_answer -> save_memory
 ```
 
 User-task redirect:
@@ -488,7 +523,7 @@ uv run portfolio-assistant "can Yubi help with TypeScript backend systems?" --su
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> classify_relevance -> plan_retrieval -> retrieve_projects -> retrieve_resume -> merge_normalize_context -> generate_answer -> save_memory
+ingest_user_message -> resolve_context -> classify_relevance -> check_ambiguity -> plan_retrieval -> retrieve_projects -> retrieve_resume -> merge_normalize_context -> generate_answer -> save_memory
 ```
 
 ---
