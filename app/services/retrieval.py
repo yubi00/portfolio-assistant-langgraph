@@ -5,11 +5,13 @@ from typing import Protocol
 import base64
 
 import httpx
+from langchain_openai import OpenAIEmbeddings
 from pydantic import BaseModel
 from pypdf import PdfReader
 
 from app.config import Settings
 from app.graph.constants import RetrievalSource
+from app.services.resume_vector_store import RetrievedChunk, ResumeVectorStore
 
 
 logger = logging.getLogger("app.services.retrieval")
@@ -25,7 +27,7 @@ class PortfolioRetrievalService(Protocol):
     async def retrieve_projects(self, query: str | None = None) -> RetrievalResult:
         ...
 
-    async def retrieve_resume(self, path_override: str | None = None) -> RetrievalResult:
+    async def retrieve_resume(self, path_override: str | None = None, query: str | None = None) -> RetrievalResult:
         ...
 
     async def retrieve_docs(self, path_override: str | None = None) -> RetrievalResult:
@@ -42,7 +44,11 @@ class ConfiguredPortfolioRetrievalService:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._configured_resume_result = _load_default_resume_source()
+        self._configured_resume_result = (
+            RetrievalResult(source=RetrievalSource.RESUME)
+            if settings.neon_database_url_string
+            else _load_default_resume_source()
+        )
 
     async def retrieve_projects(self, query: str | None = None) -> RetrievalResult:
         if not self._settings.github_owner:
@@ -120,13 +126,55 @@ class ConfiguredPortfolioRetrievalService:
             content=_format_repositories(selected_repos, readmes),
         )
 
-    async def retrieve_resume(self, path_override: str | None = None) -> RetrievalResult:
+    async def retrieve_resume(self, path_override: str | None = None, query: str | None = None) -> RetrievalResult:
         if path_override:
             return _read_text_source(RetrievalSource.RESUME, path_override, "resume path override")
+        if self._settings.neon_database_url_string:
+            return await self._retrieve_resume_vectors(query)
         return self._configured_resume_result
 
     async def retrieve_docs(self, path_override: str | None = None) -> RetrievalResult:
         return _read_text_source(RetrievalSource.DOCS, path_override or self._settings.docs_path, "DOCS_PATH")
+
+    async def _retrieve_resume_vectors(self, query: str | None) -> RetrievalResult:
+        if not query or not query.strip():
+            return RetrievalResult(source=RetrievalSource.RESUME, error="Resume vector retrieval requires a query.")
+        if not self._settings.openai_api_key:
+            return RetrievalResult(source=RetrievalSource.RESUME, error="OPENAI_API_KEY is required for resume vector retrieval.")
+
+        logger.info(
+            "resume vector retrieval | namespace=%s | top_k=%s",
+            self._settings.resume_vector_namespace,
+            self._settings.resume_vector_top_k,
+        )
+        try:
+            embedding_client = OpenAIEmbeddings(
+                model=self._settings.openai_embedding_model,
+                api_key=self._settings.openai_api_key,
+            )
+            query_embedding = await embedding_client.aembed_query(query)
+            store = ResumeVectorStore(self._settings.neon_database_url_string)
+            chunks = store.search(
+                namespace=self._settings.resume_vector_namespace,
+                query_embedding=query_embedding,
+                limit=self._settings.resume_vector_top_k,
+            )
+        except Exception as exc:
+            logger.warning("resume vector retrieval failed | reason=%s", exc)
+            return RetrievalResult(source=RetrievalSource.RESUME, error=f"Resume vector retrieval failed: {exc}")
+
+        logger.info(
+            "resume vector retrieval complete | namespace=%s | chunks=%s",
+            self._settings.resume_vector_namespace,
+            len(chunks),
+        )
+        if not chunks:
+            return RetrievalResult(
+                source=RetrievalSource.RESUME,
+                error="No indexed resume chunks were found. Run portfolio-index-resume before serving resume queries.",
+            )
+
+        return RetrievalResult(source=RetrievalSource.RESUME, content=_format_resume_chunks(chunks))
 
 
 def _read_text_source(source: RetrievalSource, configured_path: str | None, env_name: str) -> RetrievalResult:
@@ -182,6 +230,16 @@ def _log_resume_preload_result(source: str, result: RetrievalResult) -> None:
         logger.info("resume preload complete | source=%s | chars=%s", source, len(result.content))
         return
     logger.warning("resume preload skipped | source=%s | reason=%s", source, result.error)
+
+
+def _format_resume_chunks(chunks: list[RetrievedChunk]) -> str:
+    sections = ["Resume vector chunks:"]
+    for chunk in chunks:
+        sections.append(
+            f"- Source: {chunk.source} | chunk_index: {chunk.chunk_index} | distance: {chunk.distance:.4f}\n"
+            f"{_indent_readme_excerpt(chunk.content)}"
+        )
+    return "\n".join(sections)
 
 
 async def _fetch_repository_readmes(

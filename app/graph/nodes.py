@@ -110,7 +110,10 @@ class PortfolioGraphNodes:
         if not _source_was_planned(state, RetrievalSource.RESUME):
             return skipped_update(NodeName.RETRIEVE_RESUME, "resume source was not planned")
 
-        result = await self._retrieval_service.retrieve_resume(state.get("resume_path"))
+        result = await self._retrieval_service.retrieve_resume(
+            query=state.get("rewritten_query"),
+            path_override=state.get("resume_path"),
+        )
         return _result_update(result, "resume_context", NodeName.RETRIEVE_RESUME)
 
     @log_node(NodeName.RETRIEVE_DOCS)

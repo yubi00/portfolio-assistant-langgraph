@@ -48,6 +48,73 @@ async def test_resume_retrieval_reports_missing_path(tmp_path, monkeypatch):
     assert result.error == "No resume source was found. Add data/resume.md or data/resume.pdf."
 
 
+async def test_resume_retrieval_uses_vector_store_when_configured(tmp_path, monkeypatch, caplog):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(retrieval_module, "OpenAIEmbeddings", FakeEmbeddings)
+    monkeypatch.setattr(retrieval_module, "ResumeVectorStore", FakeResumeVectorStore)
+    caplog.set_level("INFO", logger="app.services.retrieval")
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            NEON_DATABASE_URL_STRING="postgresql://example",
+            RESUME_VECTOR_NAMESPACE="test",
+            RESUME_VECTOR_TOP_K=2,
+        )
+    )
+
+    result = await service.retrieve_resume(query="tell me about education")
+
+    assert result.source == RetrievalSource.RESUME
+    assert result.error is None
+    assert result.content.startswith("Resume vector chunks:")
+    assert "Master of Information Technology" in result.content
+    assert "resume vector retrieval complete" in caplog.text
+
+
+async def test_resume_path_override_keeps_local_file_retrieval_when_vectors_are_configured(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(retrieval_module, "OpenAIEmbeddings", FakeEmbeddings)
+    monkeypatch.setattr(retrieval_module, "ResumeVectorStore", FakeResumeVectorStore)
+    resume_path = tmp_path / "resume.md"
+    resume_path.write_text("# Resume\n\nLocal override.", encoding="utf-8")
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            NEON_DATABASE_URL_STRING="postgresql://example",
+        )
+    )
+
+    result = await service.retrieve_resume(query="anything", path_override=str(resume_path))
+
+    assert result.source == RetrievalSource.RESUME
+    assert result.content == "# Resume\n\nLocal override."
+    assert result.error is None
+
+
+async def test_resume_vector_retrieval_reports_missing_index(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(retrieval_module, "OpenAIEmbeddings", FakeEmbeddings)
+    monkeypatch.setattr(retrieval_module, "ResumeVectorStore", EmptyResumeVectorStore)
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            NEON_DATABASE_URL_STRING="postgresql://example",
+        )
+    )
+
+    result = await service.retrieve_resume(query="tell me about education")
+
+    assert result.source == RetrievalSource.RESUME
+    assert result.content == ""
+    assert result.error == "No indexed resume chunks were found. Run portfolio-index-resume before serving resume queries."
+
+
 async def test_project_retrieval_reports_missing_github_owner(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     service = ConfiguredPortfolioRetrievalService(
@@ -254,3 +321,38 @@ class FakeGitHubClient:
             ).decode("utf-8")
             return FakeResponse({"content": encoded}, status_code=self._readme_status)
         return FakeResponse({}, status_code=404)
+
+
+class FakeEmbeddings:
+    def __init__(self, model, api_key):
+        self.model = model
+        self.api_key = api_key
+
+    async def aembed_query(self, query):
+        return [0.1] * 1536
+
+
+class FakeResumeVectorStore:
+    def __init__(self, database_url):
+        self.database_url = database_url
+
+    def search(self, *, namespace, query_embedding, limit):
+        assert namespace == "test"
+        assert len(query_embedding) == 1536
+        assert limit == 2
+        return [
+            retrieval_module.RetrievedChunk(
+                content="## Education\n\nMaster of Information Technology.",
+                source="data/resume.md",
+                chunk_index=4,
+                distance=0.12,
+            )
+        ]
+
+
+class EmptyResumeVectorStore:
+    def __init__(self, database_url):
+        self.database_url = database_url
+
+    def search(self, *, namespace, query_embedding, limit):
+        return []

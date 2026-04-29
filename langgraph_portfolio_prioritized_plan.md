@@ -90,11 +90,10 @@ Status: complete for first retrieval-node implementation.
 Notes:
 - `projects` uses GitHub REST API and best-effort README enrichment.
 - Named project queries focus retrieval on the matching repository and use a larger README excerpt budget for deeper project-specific answers.
-- Work-experience answers use the `resume` source because the resume already contains employment history.
-- The app auto-loads `data/resume.md` or `data/resume.pdf` by default.
-- CLI supports `--resume-path` only as a one-off testing override.
+- Resume retrieval now uses Neon pgvector when `NEON_DATABASE_URL_STRING` is configured.
+- CLI supports `--resume-path` as a one-off local-file override.
 - PDF-to-Markdown conversion helper exists in `scripts/convert_resume_pdf.py`.
-- Full PDF/DOCX ingestion and RAG are intentionally deferred.
+- PDF/DOCX ingestion into the vector store is intentionally deferred.
 
 ---
 
@@ -226,23 +225,25 @@ Notes:
 - MUST [x] Add Neon Postgres + pgvector schema for resume documents and chunks
 - MUST [x] Define deterministic resume ingestion output for vector indexing
 - MUST [x] Chunk resume into stable sections suitable for retrieval
+- MUST [x] Promote raw resume labels into semantic Markdown headings before chunking
 - MUST [x] Generate embeddings through an explicit offline ingestion script
 - MUST [x] Make ingestion idempotent using document and chunk content hashes
 - MUST [x] Support dry-run and force-rebuild ingestion modes
-- MUST [ ] Retrieve top-k resume chunks for resume-related questions
-- MUST [ ] Require indexed resume vectors for production resume retrieval
-- SHOULD [ ] Add tests for chunking, idempotency, stale chunk cleanup, and no-result behavior
+- MUST [x] Retrieve top-k resume chunks for resume-related questions
+- MUST [x] Require indexed resume vectors for normal configured resume retrieval
+- SHOULD [x] Add tests for chunking and no-result behavior
+- SHOULD [ ] Add integration tests for idempotency and stale chunk cleanup
 - NICE [ ] Extend the same ingestion pattern to docs and case studies later
 
-Status: planned, intentionally deferred until the current non-vector assistant is stable.
+Status: complete for current resume RAG scope. Integration coverage for database idempotency and stale cleanup remains a future hardening task.
 
 Notes:
-- Initial offline indexing foundation is implemented. Live graph retrieval still uses the existing full-resume path until Neon indexing is manually verified.
-- Resume section-aware retrieval is parked until this phase. Do not build a separate deterministic section router unless there is a clear short-term need.
+- Initial offline indexing foundation is implemented. Live graph retrieval uses pgvector top-k chunks when `NEON_DATABASE_URL_STRING` is configured, while explicit `resume_path` remains a local-file override for development.
+- Resume chunking is section-aware. Do not build a separate deterministic section router unless there is a clear short-term need.
 - Ingestion should be offline for both local development and production. Do not index embeddings during API server startup.
 - The API server should serve requests from an already-indexed vector store and should not perform heavy indexing work in the request or startup path.
 - Use Neon Postgres with pgvector for the first implementation unless a blocker appears.
-- Do not add optional RAG/bootstrap feature flags for normal operation. Missing vectors should be treated as setup/configuration failure once this phase is active.
+- Do not add optional RAG/bootstrap feature flags for normal operation. Missing vectors are surfaced as setup/configuration failure when vector retrieval is configured.
 - The first implementation should stay simple: explicit indexing script, deterministic chunking, idempotent upserts, small top-k retrieval.
 
 ---
@@ -303,7 +304,7 @@ Guiding principle:
 - SHOULD [x] Enrich `projects` retrieval with README content
 - SHOULD [ ] Add featured project detail
 - SHOULD [ ] Add relevance scoring/ranking so project answers prefer the best-matching projects instead of mostly recent repositories
-- SHOULD [ ] Park resume section-aware retrieval until the resume embeddings/vector phase
+- SHOULD [x] Add resume section-aware chunking in the resume embeddings/vector phase
 - SHOULD [x] Add clarification behavior for ambiguous follow-up questions instead of guessing
 
 Expected value:
@@ -323,7 +324,7 @@ Expected value:
 
 ### Later: Advanced Capability Upgrades
 
-- NICE [ ] Add resume embeddings and vector retrieval
+- NICE [x] Add resume embeddings and vector retrieval
 - NICE [ ] Add richer long-form docs ingestion and selective RAG for larger document sets
 - NICE [ ] Add entity/topic memory beyond bounded chat history
 - NICE [ ] Add evaluation datasets for answer quality and retrieval quality

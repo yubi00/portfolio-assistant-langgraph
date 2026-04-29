@@ -64,11 +64,13 @@ Phase 3 adds first-pass retrieval:
 - `projects` from GitHub using `GITHUB_OWNER` and optional `GITHUB_TOKEN`; forks are excluded by default
 - README excerpts are fetched best-effort for each selected repository when available
 - named project questions focus retrieval on the matching repository and use a larger README excerpt budget
-- `resume` and `docs` from local text/markdown files
+- `resume` from Neon pgvector when `NEON_DATABASE_URL_STRING` is configured
+- explicit `resume_path` local-file override for development and debugging
+- `docs` from local text/markdown files
 - merged context passed into answer generation
 - planned retrieval sources fan out to selected retrievers and then merge before answer generation
 
-PDF/DOCX resume ingestion and vector/RAG retrieval are deferred until later.
+PDF/DOCX resume ingestion into the vector store is deferred. Current production-style resume RAG expects Markdown input.
 
 ## Resume Vector Indexing
 
@@ -100,7 +102,11 @@ uv run portfolio-index-resume --resume-path data/resume.md --dry-run
 uv run portfolio-index-resume --resume-path data/resume.md --force
 ```
 
-The indexer creates the pgvector schema, chunks the Markdown resume deterministically, embeds chunks with `OPENAI_EMBEDDING_MODEL`, and upserts by stable document/chunk hashes. Re-running the command exits before embedding when the stored document and chunk hashes are unchanged.
+The indexer creates the pgvector schema, normalizes raw resume text into semantic Markdown sections, embeds chunks with `OPENAI_EMBEDDING_MODEL`, and upserts by stable document/chunk hashes. Re-running the command exits before embedding when the stored document and chunk hashes are unchanged.
+
+Resume chunking is section-aware. Plain resume labels such as `PROFILE`, `CORE SKILLS`, `SELECTED AI PROJECTS`, `EXPERIENCE`, `EDUCATION`, and `CERTIFICATIONS` are promoted to Markdown headings before chunking, with project/role/education entries promoted to subsections where appropriate.
+
+When `NEON_DATABASE_URL_STRING` is configured, normal resume-related assistant queries retrieve top-k chunks from pgvector instead of injecting the full local resume. The CLI/API still allow `resume_path` as an explicit local-file override for development.
 
 ## Setup
 
@@ -109,14 +115,15 @@ uv sync --dev
 Copy-Item .env.example .env
 ```
 
-Fill in `OPENAI_API_KEY`, `ASSISTANT_SUBJECT`, and optionally `GITHUB_OWNER` / `GITHUB_TOKEN` in `.env`.
+Fill in `OPENAI_API_KEY`, `ASSISTANT_SUBJECT`, and optionally `GITHUB_OWNER` / `GITHUB_TOKEN` in `.env`. For resume RAG, also set `NEON_DATABASE_URL_STRING` and run the offline indexer after adding or updating `data/resume.md`.
 
 Project README enrichment is controlled by `GITHUB_README_MAX_CHARS` for broad project lists and `GITHUB_TARGET_README_MAX_CHARS` for focused named-repository retrieval. Repositories without a README still appear with their normal metadata.
 
-For resume-backed answers, add your resume as either:
+For vector-backed resume answers, add your resume as:
 
 - `data/resume.md`
-- `data/resume.pdf`
+
+`data/resume.pdf` can still be used only through the local-file override path. Convert it to Markdown before vector indexing.
 
 ## Run
 
@@ -168,9 +175,9 @@ Use `--subject` to override the configured portfolio subject for a single run:
 uv run portfolio-assistant "What projects has Yubi built?" --subject "Yubi"
 ```
 
-Use `--context` only for temporary ad-hoc facts during manual testing. For normal usage, place your resume at `data/resume.md` or `data/resume.pdf` and let the app load it automatically.
+Use `--context` only for temporary ad-hoc facts during manual testing. For normal usage, place your resume at `data/resume.md`, run `portfolio-index-resume`, and let resume-related queries retrieve from pgvector.
 
-Use `--resume-path` only when you want to override the default resume source for a single CLI run:
+Use `--resume-path` only when you want to bypass pgvector and read a local resume source for a single CLI run:
 
 ```powershell
 uv run portfolio-assistant "what is Yubi's work experience?" `
@@ -219,7 +226,7 @@ The app now applies basic reliability controls to OpenAI-backed graph steps:
 
 ## Current Limitation
 
-Resume PDF loading is supported from `data/resume.pdf`, but richer PDF/DOCX ingestion and RAG are intentionally deferred.
+Resume PDF loading is still supported through explicit local-file overrides, but PDF/DOCX ingestion into the vector store is intentionally deferred.
 
 The streaming implementation emits these SSE events:
 

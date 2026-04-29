@@ -16,12 +16,12 @@ Implemented phases:
 - Phase 3A: retrieval nodes, GitHub project retrieval, local resume/docs retrieval, and context merging
 - Phase 6A/B: API session contract, app-level session store, explicit `save_memory` graph step, and checkpointer evaluation
 - Phase 8A: SSE streaming route reusing the existing prompt runner and graph-level answer-token streaming
+- Phase 12A/B: offline resume embedding ingestion, Neon pgvector storage, semantic resume chunking, and vector-backed resume retrieval
 - Clarification guard rail: deterministic ambiguity detection for risky follow-up references
 
 Not implemented yet:
 
 - PDF/DOCX resume ingestion
-- vector/RAG-backed resume retrieval
 - external observability layers
 - advanced reliability layers
 
@@ -39,6 +39,9 @@ flowchart LR
     Graph["LangGraph StateGraph"]
     Sessions["InMemorySessionStore\nsession_id -> history"]
     OpenAI["OpenAI via\nlangchain-openai"]
+    Neon["Neon Postgres\npgvector"]
+    Indexer["Offline Resume Indexer\nportfolio-index-resume"]
+    ResumeFile["data/resume.md"]
     Config["Settings\n.env"]
 
     User --> CLI
@@ -53,10 +56,15 @@ flowchart LR
     Sessions --> API
     Sessions --> StreamAPI
     Graph --> OpenAI
+    Graph --> Neon
+    ResumeFile --> Indexer
+    Indexer --> OpenAI
+    Indexer --> Neon
     Config --> CLI
     Config --> API
     Config --> Runner
     Config --> OpenAI
+    Config --> Indexer
 ```
 
 Key boundary: CLI and FastAPI are transports. They do not own assistant behavior. Both call the same `run_prompt()` service, which invokes the graph and shapes the response.
@@ -124,7 +132,9 @@ The first retrieval implementation uses:
 - GitHub REST API for `projects`; forks are excluded by default for "built projects" accuracy
 - best-effort README enrichment for selected repositories, bounded by `GITHUB_README_MAX_CHARS`
 - focused named-repository retrieval for project deep dives, bounded by `GITHUB_TARGET_README_MAX_CHARS`
-- local text/markdown files for `resume` and `docs`
+- vector-backed resume retrieval from Neon pgvector when `NEON_DATABASE_URL_STRING` is configured
+- local text/markdown files for `docs`
+- local file override for `resume` when an explicit `resume_path` is supplied
 
 The graph dispatches only planned retrieval sources with LangGraph dynamic sends. Independent retrieval nodes can run concurrently, then join at `merge_normalize_context`.
 
@@ -148,14 +158,127 @@ Trade-off: excluding forks may hide meaningful fork-based contributions. README 
 
 Resume strategy:
 
-- Current: load a small resume source automatically from `data/resume.md` or `data/resume.pdf`. Work-experience questions use the `resume` source because a normal 1-2 page resume already contains the experience section.
-- CLI still supports `--resume-path` as a one-off override for local testing.
-- PDF resumes can be loaded directly, and the existing `scripts/convert_resume_pdf.py` helper remains available when Markdown inspection is useful.
-- Later: accept PDF/DOCX, normalize into Markdown/JSON during ingestion, then optionally chunk/index for RAG.
+- Current production path: resume-related queries embed the rewritten query, search top-k chunks in Neon pgvector, and pass retrieved chunks into answer generation.
+- Ingestion path: `portfolio-index-resume` reads `data/resume.md`, normalizes it into semantic Markdown, chunks it deterministically, embeds chunks with `OPENAI_EMBEDDING_MODEL`, and upserts them into Neon.
+- CLI/API still support explicit `resume_path` as a local-file override for development and debugging.
+- PDF resumes can be loaded directly only through the local-file path. Production RAG ingestion currently expects Markdown.
+- Later: normalize PDF/DOCX into Markdown/JSON before indexing, then apply the same vector ingestion path.
 
-Problem solved: local setup no longer requires passing a resume path on every API call, and a 1-2 page resume still fits comfortably in context so RAG is not required for the first useful version.
+Problem solved: resume retrieval now follows production-like RAG behavior instead of injecting the whole resume into the prompt, while keeping local override ergonomics for development.
 
-Trade-off: direct context loading is simpler but less scalable for larger document collections. RAG remains a later upgrade, not a Phase 3 blocker.
+Trade-off: RAG adds OpenAI embedding latency and a database dependency per resume query. This is acceptable because resume retrieval now scales beyond one small file and mirrors the architecture needed for larger knowledge sources.
+
+---
+
+## Resume RAG And Embedding Architecture
+
+Resume RAG has two separate flows: offline ingestion and runtime retrieval. Keeping these separate is intentional.
+
+### Offline Ingestion Flow
+
+```mermaid
+flowchart TD
+    Resume["data/resume.md"]
+    Indexer["portfolio-index-resume"]
+    Normalize["normalize text\nremove page headings\npromote semantic headings"]
+    Chunk["deterministic chunks\nstable chunk_index\ncontent_hash"]
+    HashCheck["index freshness check\nnamespace + source + hashes"]
+    Embed["OpenAI embeddings\ntext-embedding-3-small"]
+    Store["Neon Postgres\npgvector"]
+
+    Resume --> Indexer
+    Indexer --> Normalize
+    Normalize --> Chunk
+    Chunk --> HashCheck
+    HashCheck -->|unchanged| Skip["skip embedding and writes"]
+    HashCheck -->|changed or forced| Embed
+    Embed --> Store
+```
+
+The indexer owns heavy work. API startup does not generate embeddings and request handling never performs indexing.
+
+### Runtime Retrieval Flow
+
+```mermaid
+flowchart TD
+    Query["rewritten_query"]
+    EmbedQuery["embed query\nOpenAI embeddings"]
+    Search["pgvector cosine search\nORDER BY embedding <=> query\nLIMIT RESUME_VECTOR_TOP_K"]
+    Format["format chunks\nsource, chunk_index, distance, content"]
+    Merge["merge_normalize_context"]
+    Answer["generate_answer"]
+
+    Query --> EmbedQuery
+    EmbedQuery --> Search
+    Search --> Format
+    Format --> Merge
+    Merge --> Answer
+```
+
+Runtime retrieval is used only when the planner selects the `resume` source and no explicit `resume_path` override is supplied.
+
+### Storage Model
+
+```mermaid
+erDiagram
+    resume_documents ||--o{ resume_chunks : owns
+
+    resume_documents {
+        uuid id PK
+        text namespace
+        text source
+        text content_hash
+        timestamptz indexed_at
+    }
+
+    resume_chunks {
+        uuid id PK
+        uuid document_id FK
+        text namespace
+        text source
+        int chunk_index
+        text content
+        text content_hash
+        vector embedding
+    }
+```
+
+`resume_documents` tracks the indexed source and full-document hash. `resume_chunks` stores searchable text chunks and embeddings. Unique keys on `(namespace, source)` and `(namespace, source, chunk_index)` make ingestion deterministic and repeatable.
+
+### Chunking Strategy
+
+The source resume is extracted Markdown, but its section labels are plain uppercase text rather than real Markdown headings. The indexer therefore performs deterministic semantic normalization before chunking:
+
+- promote `PROFILE`, `CORE SKILLS`, `SELECTED AI PROJECTS`, `EXPERIENCE`, `EDUCATION`, and `CERTIFICATIONS` to `##` headings
+- promote individual selected projects and experience roles to `###` headings
+- keep education and certifications as compact sections so closely related facts stay together
+- split oversized sections by paragraph, then by words, using `RESUME_CHUNK_MAX_CHARS`
+
+This gives the vector store meaningful retrieval units such as:
+
+- `## Profile`
+- `## Core Skills`
+- `### MCP Terminal Portfolio - yubi.sh`
+- `### Senior Backend Developer - FifthDomain`
+- `## Education`
+- `## Certifications`
+
+Decision: semantic section chunking before embeddings instead of overlapping fixed-size chunks.
+
+Problem solved: resume queries retrieve meaningful professional sections rather than arbitrary page fragments.
+
+Trade-off: this is tailored to resume-like documents and known labels. It is deterministic and easy to inspect, but not a general document parser. For broader docs/case studies, a separate chunking policy may be needed.
+
+### Runtime Logs
+
+Resume vector retrieval emits explicit logs:
+
+```text
+resume vector retrieval | namespace=default | top_k=5
+resume vector retrieval complete | namespace=default | chunks=5
+```
+
+These logs confirm whether a resume query used pgvector instead of local file injection.
 
 ---
 
@@ -490,6 +613,42 @@ Decision: add a deterministic `check_ambiguity` node between relevance classific
 Problem solved: the assistant can stop and ask a short clarification question instead of producing a wrong confident answer in edge cases.
 
 Trade-off: this adds one more branch to the graph, but keeps the behavior simple, explicit, and rare. The guard rail is intentionally narrower than full agentic disambiguation and should only trigger when resolution is genuinely unsafe.
+
+---
+
+### 19. Use Offline Resume Embedding Ingestion With Neon pgvector
+
+Problem: full-resume prompt injection is simple, but it does not mimic production RAG behavior and does not scale well once resume data grows into multiple documents, case studies, or long-form notes.
+
+Decision: use an explicit offline ingestion command that indexes the resume into Neon Postgres with pgvector. Runtime resume queries embed the rewritten query and retrieve top-k chunks from the already-indexed vector store.
+
+Problem solved: local and production environments follow the same ingestion model, API startup remains fast, and request handling avoids hidden heavy indexing work.
+
+Trade-off: developers must run the indexer after resume changes, and runtime resume retrieval now depends on Neon plus OpenAI embeddings. This is a reasonable production-style tradeoff because indexing should be an explicit deployment/data operation, not an implicit side effect of server startup.
+
+---
+
+### 20. Use Semantic Resume Chunking Before Embeddings
+
+Problem: extracted resume Markdown may contain page headings and uppercase labels instead of meaningful Markdown sections. Chunking directly on `## Page 1` and `## Page 2` creates poor retrieval units.
+
+Decision: normalize known resume labels into semantic Markdown headings before chunking. Split individual projects and experience roles into subsections, but keep education and certifications compact.
+
+Problem solved: vector search operates over meaningful resume sections, improving answers for queries about work history, projects, education, certifications, and skills.
+
+Trade-off: the normalization is intentionally resume-specific. It is more maintainable than an LLM preprocessing step and more meaningful than fixed-size overlap chunks, but it may need extension if future resume formats use different labels.
+
+---
+
+### 21. Keep Local Resume Path Override During RAG Migration
+
+Problem: production should use indexed resume vectors, but local debugging still benefits from passing a one-off resume file.
+
+Decision: if `resume_path` is explicitly supplied, the retriever reads that local file and bypasses vector retrieval. Otherwise, when `NEON_DATABASE_URL_STRING` is configured, resume retrieval uses pgvector.
+
+Problem solved: the system can move toward production RAG behavior without losing the fast local testing path used by the CLI and tests.
+
+Trade-off: there are two resume retrieval paths during migration. This is acceptable because the override is explicit and easy to detect in traces/logs.
 
 ---
 

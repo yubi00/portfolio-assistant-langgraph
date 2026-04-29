@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     neon_database_url_string: str | None = Field(default=None, validation_alias="NEON_DATABASE_URL_STRING")
     resume_vector_namespace: str = Field(default="default", validation_alias="RESUME_VECTOR_NAMESPACE")
     resume_chunk_max_chars: int = Field(default=1200, validation_alias="RESUME_CHUNK_MAX_CHARS")
+    resume_vector_top_k: int = Field(default=5, validation_alias="RESUME_VECTOR_TOP_K")
 
     context_history_window: int = Field(default=4, validation_alias="CONTEXT_HISTORY_WINDOW")
     session_history_max_turns: int = Field(default=10, validation_alias="SESSION_HISTORY_MAX_TURNS")

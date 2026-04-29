@@ -15,7 +15,7 @@ class ResumeChunk:
 
 def chunk_resume(content: str, *, source: str, max_chars: int = 1200) -> list[ResumeChunk]:
     """Split resume Markdown/text into deterministic chunks for vector indexing."""
-    normalized = normalize_resume_text(content)
+    normalized = semantic_resume_markdown(normalize_resume_text(content))
     if not normalized:
         return []
 
@@ -50,6 +50,33 @@ def normalize_resume_text(content: str) -> str:
     return "\n".join(normalized_lines).strip()
 
 
+def semantic_resume_markdown(content: str) -> str:
+    """Promote common resume labels into Markdown headings for better retrieval chunks."""
+    lines = content.splitlines()
+    output: list[str] = []
+    current_section: str | None = None
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            output.append("")
+            continue
+        if _is_page_heading(line):
+            continue
+        if line.startswith("#"):
+            output.append(line)
+            continue
+        if section_heading := _semantic_section_heading(line):
+            current_section = section_heading
+            output.extend(_with_heading_spacing(output, f"## {section_heading}"))
+            continue
+        if subsection_heading := _semantic_subsection_heading(line, current_section):
+            output.extend(_with_heading_spacing(output, f"### {subsection_heading}"))
+            continue
+        output.append(line)
+
+    return normalize_resume_text("\n".join(output))
+
+
 def hash_text(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
@@ -66,6 +93,47 @@ def _split_markdown_sections(content: str) -> list[str]:
     if current:
         sections.append(current)
     return ["\n".join(section).strip() for section in sections if "\n".join(section).strip()]
+
+
+SECTION_LABELS = {
+    "PROFILE": "Profile",
+    "CORE SKILLS": "Core Skills",
+    "SELECTED AI PROJECTS": "Selected AI Projects",
+    "EXPERIENCE": "Experience",
+    "EDUCATION": "Education",
+    "CERTIFICATIONS": "Certifications",
+}
+SUBSECTION_SECTIONS = {"Selected AI Projects", "Experience"}
+SUBSECTION_PATTERNS = {
+    "Selected AI Projects": re.compile(r"^[A-Z][A-Za-z0-9 .()/+-]+(?:—|-|–|â€”|â€“)\s+[A-Za-z0-9].+"),
+    "Experience": re.compile(r"^[A-Z][A-Za-z0-9 .()/+-]+(?:—|-|–|â€”|â€“)\s+[A-Za-z0-9].+"),
+}
+
+
+def _is_page_heading(line: str) -> bool:
+    return bool(re.fullmatch(r"##\s+Page\s+\d+", line, flags=re.IGNORECASE))
+
+
+def _semantic_section_heading(line: str) -> str | None:
+    return SECTION_LABELS.get(line.upper())
+
+
+def _semantic_subsection_heading(line: str, current_section: str | None) -> str | None:
+    if current_section not in SUBSECTION_SECTIONS or ":" in line:
+        return None
+    pattern = SUBSECTION_PATTERNS[current_section]
+    if pattern.match(line):
+        return line
+    return None
+
+
+def _with_heading_spacing(existing_lines: list[str], heading: str) -> list[str]:
+    spacing = []
+    if existing_lines and existing_lines[-1] != "":
+        spacing.append("")
+    spacing.append(heading)
+    spacing.append("")
+    return spacing
 
 
 def _split_large_section(section: str, *, max_chars: int) -> list[str]:

@@ -67,7 +67,7 @@ class FakeRetrievalService:
     async def retrieve_projects(self, query=None):
         return RetrievalResult(source=RetrievalSource.PROJECTS, content="Project data")
 
-    async def retrieve_resume(self, path_override=None):
+    async def retrieve_resume(self, path_override=None, query=None):
         return RetrievalResult(source=RetrievalSource.RESUME, content="Resume data")
 
     async def retrieve_docs(self, path_override=None):

@@ -1,4 +1,4 @@
-from app.services.resume_rag import chunk_resume, hash_text, normalize_resume_text
+from app.services.resume_rag import chunk_resume, hash_text, normalize_resume_text, semantic_resume_markdown
 
 
 def test_normalize_resume_text_collapses_repeated_blank_lines():
@@ -40,3 +40,62 @@ def test_chunk_resume_splits_large_sections_without_losing_words():
     joined = " ".join(chunk.content for chunk in chunks)
     assert "word0" in joined
     assert "word79" in joined
+
+
+def test_semantic_resume_markdown_promotes_plain_resume_labels():
+    content = """# Resume
+
+## Page 1
+
+PROFILE
+Backend engineer.
+CORE SKILLS
+Languages: TypeScript, Python
+SELECTED AI PROJECTS
+MatchCast — AI Audio Analysis System
+Built audio analysis.
+
+## Page 2
+
+EXPERIENCE
+AI Engineer — Future Secure AI (Apr 2026 – Present)
+Built agent systems.
+EDUCATION
+Master of Information Technology — La Trobe University
+CERTIFICATIONS
+AWS Certified Developer – Associate
+"""
+
+    markdown = semantic_resume_markdown(normalize_resume_text(content))
+
+    assert "## Page 1" not in markdown
+    assert "## Profile" in markdown
+    assert "## Core Skills" in markdown
+    assert "## Selected AI Projects" in markdown
+    assert "### MatchCast — AI Audio Analysis System" in markdown
+    assert "## Experience" in markdown
+    assert "### AI Engineer — Future Secure AI (Apr 2026 – Present)" in markdown
+    assert "## Education" in markdown
+    assert "### Master of Information Technology" not in markdown
+    assert "## Certifications" in markdown
+
+
+def test_chunk_resume_uses_semantic_sections_for_raw_resume_text():
+    content = """# Resume
+
+PROFILE
+Backend engineer.
+EXPERIENCE
+AI Engineer — Future Secure AI (Apr 2026 – Present)
+Built agent systems.
+EDUCATION
+Master of Information Technology — La Trobe University
+"""
+
+    chunks = chunk_resume(content, source="data/resume.md", max_chars=1200)
+
+    assert any(chunk.content.startswith("## Profile") for chunk in chunks)
+    assert any(chunk.content.startswith("## Experience") for chunk in chunks)
+    assert any(chunk.content.startswith("### AI Engineer") for chunk in chunks)
+    education_chunk = next(chunk for chunk in chunks if chunk.content.startswith("## Education"))
+    assert "Master of Information Technology" in education_chunk.content
