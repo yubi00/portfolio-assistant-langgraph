@@ -263,6 +263,27 @@ Notes:
 
 ---
 
+## Phase 14 - Frontend Migration
+
+- MUST [ ] Reuse the existing `ai-portfolio` React terminal frontend
+- MUST [ ] Update non-streaming `/prompt` adapter for the LangGraph response shape
+- MUST [ ] Update `/prompt/stream` SSE adapter for LangGraph event names
+- MUST [ ] Map backend progress events to safe user-facing status labels
+- MUST [ ] Preserve `session_id` reuse for follow-up questions
+- MUST [ ] Hide raw graph internals from the public UI
+- SHOULD [ ] Reuse existing frontend auth utilities after backend auth is implemented
+- SHOULD [ ] Add a debug-only mode for traces and retrieval metadata
+- NICE [ ] Keep old-backend compatibility temporarily behind an adapter flag if useful during migration
+
+Status: planned.
+
+Notes:
+- Frontend migration details live in `FRONTEND_MIGRATION_PLAN.md`.
+- Do not rebuild the frontend from scratch. The goal is an API contract migration, not a UX rewrite.
+- Public UI should show friendly work states, not internal graph node names or retrieval planner details.
+
+---
+
 ## Smartness Roadmap
 
 This section tracks capability upgrades that make the assistant materially smarter without adding unnecessary orchestration complexity.
@@ -315,7 +336,8 @@ Expected value:
 4. Performance comparison against the old system
 5. Resume embeddings/vector retrieval
 6. Public production hardening: auth, rate limits, CORS, streaming abuse protection
-7. Larger-doc RAG only when needed
+7. Frontend migration to the LangGraph backend
+8. Larger-doc RAG only when needed
 
 ---
 
