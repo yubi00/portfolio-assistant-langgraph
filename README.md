@@ -70,6 +70,38 @@ Phase 3 adds first-pass retrieval:
 
 PDF/DOCX resume ingestion and vector/RAG retrieval are deferred until later.
 
+## Resume Vector Indexing
+
+Resume RAG work starts with explicit offline ingestion. The API server should not generate embeddings during startup.
+
+Set these values before indexing:
+
+```powershell
+$env:NEON_DATABASE_URL_STRING="postgresql://..."
+$env:OPENAI_API_KEY="..."
+```
+
+Then run:
+
+```powershell
+uv run portfolio-index-resume --resume-path data/resume.md
+```
+
+Equivalent module form:
+
+```powershell
+uv run python -m scripts.index_resume --resume-path data/resume.md
+```
+
+Useful options:
+
+```powershell
+uv run portfolio-index-resume --resume-path data/resume.md --dry-run
+uv run portfolio-index-resume --resume-path data/resume.md --force
+```
+
+The indexer creates the pgvector schema, chunks the Markdown resume deterministically, embeds chunks with `OPENAI_EMBEDDING_MODEL`, and upserts by stable document/chunk hashes. Re-running the command exits before embedding when the stored document and chunk hashes are unchanged.
+
 ## Setup
 
 ```powershell

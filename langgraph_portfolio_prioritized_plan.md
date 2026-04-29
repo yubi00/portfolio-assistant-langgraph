@@ -223,21 +223,27 @@ Notes:
 
 ## Phase 12 - Resume Embeddings And Vector Retrieval
 
-- MUST [ ] Define resume ingestion output format for vector indexing
-- MUST [ ] Chunk resume into stable sections suitable for retrieval
-- MUST [ ] Generate embeddings for resume chunks through an offline or startup script
-- MUST [ ] Store vectors in a local/dev-friendly vector store first
+- MUST [x] Add Neon Postgres + pgvector schema for resume documents and chunks
+- MUST [x] Define deterministic resume ingestion output for vector indexing
+- MUST [x] Chunk resume into stable sections suitable for retrieval
+- MUST [x] Generate embeddings through an explicit offline ingestion script
+- MUST [x] Make ingestion idempotent using document and chunk content hashes
+- MUST [x] Support dry-run and force-rebuild ingestion modes
 - MUST [ ] Retrieve top-k resume chunks for resume-related questions
-- SHOULD [ ] Keep current full-resume loading as a fallback during migration
-- SHOULD [ ] Add tests for chunking, retrieval fallback, and no-result behavior
+- MUST [ ] Require indexed resume vectors for production resume retrieval
+- SHOULD [ ] Add tests for chunking, idempotency, stale chunk cleanup, and no-result behavior
 - NICE [ ] Extend the same ingestion pattern to docs and case studies later
 
 Status: planned, intentionally deferred until the current non-vector assistant is stable.
 
 Notes:
+- Initial offline indexing foundation is implemented. Live graph retrieval still uses the existing full-resume path until Neon indexing is manually verified.
 - Resume section-aware retrieval is parked until this phase. Do not build a separate deterministic section router unless there is a clear short-term need.
-- This phase should mimic production RAG behavior more closely than ad-hoc section splitting.
-- The first implementation should stay simple: offline/scripted indexing, small top-k retrieval, clear fallback when embeddings are unavailable.
+- Ingestion should be offline for both local development and production. Do not index embeddings during API server startup.
+- The API server should serve requests from an already-indexed vector store and should not perform heavy indexing work in the request or startup path.
+- Use Neon Postgres with pgvector for the first implementation unless a blocker appears.
+- Do not add optional RAG/bootstrap feature flags for normal operation. Missing vectors should be treated as setup/configuration failure once this phase is active.
+- The first implementation should stay simple: explicit indexing script, deterministic chunking, idempotent upserts, small top-k retrieval.
 
 ---
 

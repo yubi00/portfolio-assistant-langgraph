@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     openai_temperature: float = Field(default=0.2, validation_alias="OPENAI_TEMPERATURE")
     openai_timeout_seconds: float = Field(default=30.0, validation_alias="OPENAI_TIMEOUT_SECONDS")
     openai_max_retries: int = Field(default=2, validation_alias="OPENAI_MAX_RETRIES")
+    openai_embedding_model: str = Field(default="text-embedding-3-small", validation_alias="OPENAI_EMBEDDING_MODEL")
 
     assistant_subject: str = Field(validation_alias="ASSISTANT_SUBJECT")
 
@@ -27,6 +28,10 @@ class Settings(BaseSettings):
 
     docs_path: str | None = Field(default=None, validation_alias="DOCS_PATH")
     merged_context_max_chars: int = Field(default=12000, validation_alias="MERGED_CONTEXT_MAX_CHARS")
+
+    neon_database_url_string: str | None = Field(default=None, validation_alias="NEON_DATABASE_URL_STRING")
+    resume_vector_namespace: str = Field(default="default", validation_alias="RESUME_VECTOR_NAMESPACE")
+    resume_chunk_max_chars: int = Field(default=1200, validation_alias="RESUME_CHUNK_MAX_CHARS")
 
     context_history_window: int = Field(default=4, validation_alias="CONTEXT_HISTORY_WINDOW")
     session_history_max_turns: int = Field(default=10, validation_alias="SESSION_HISTORY_MAX_TURNS")
