@@ -90,6 +90,7 @@ Status: complete for first retrieval-node implementation.
 Notes:
 - `projects` uses GitHub REST API and best-effort README enrichment.
 - Named project queries focus retrieval on the matching repository and use a larger README excerpt budget for deeper project-specific answers.
+- Featured project metadata is loaded from `portfolio/featured_projects.json` by default and is used for subjective project preference questions.
 - Resume retrieval now uses Neon pgvector when `NEON_DATABASE_URL_STRING` is configured.
 - CLI supports `--resume-path` as a one-off local-file override.
 - PDF-to-Markdown conversion helper exists in `scripts/convert_resume_pdf.py`.
@@ -302,7 +303,7 @@ Guiding principle:
 ### Near-Term: High Impact, Lower Complexity
 
 - SHOULD [x] Enrich `projects` retrieval with README content
-- SHOULD [ ] Add featured project detail
+- SHOULD [x] Add featured project detail
 - SHOULD [ ] Add relevance scoring/ranking so project answers prefer the best-matching projects instead of mostly recent repositories
 - SHOULD [x] Add resume section-aware chunking in the resume embeddings/vector phase
 - SHOULD [x] Add clarification behavior for ambiguous follow-up questions instead of guessing
@@ -338,13 +339,11 @@ Expected value:
 ### Recommended Implementation Order
 
 1. Project relevance scoring/ranking
-2. Featured project detail
-3. Structured answer modes for concise vs detailed responses
-4. Performance comparison against the old system
-5. Resume embeddings/vector retrieval
-6. Public production hardening: auth, rate limits, CORS, streaming abuse protection
-7. Frontend migration to the LangGraph backend
-8. Larger-doc RAG only when needed
+2. Structured answer modes for concise vs detailed responses
+3. Performance comparison against the old system
+4. Public production hardening: auth, rate limits, CORS, streaming abuse protection
+5. Frontend migration to the LangGraph backend
+6. Larger-doc RAG only when needed
 
 ---
 

@@ -3,6 +3,7 @@ import unicodedata
 from pathlib import Path
 from typing import Protocol
 import base64
+import re
 
 import httpx
 from langchain_openai import OpenAIEmbeddings
@@ -11,6 +12,7 @@ from pypdf import PdfReader
 
 from app.config import Settings
 from app.graph.constants import RetrievalSource
+from app.services.featured_projects import FeaturedProject, find_featured_project, load_featured_projects
 from app.services.resume_vector_store import RetrievedChunk, ResumeVectorStore
 
 
@@ -49,6 +51,7 @@ class ConfiguredPortfolioRetrievalService:
             if settings.neon_database_url_string
             else _load_default_resume_source()
         )
+        self._featured_projects = load_featured_projects(settings.featured_projects_path)
 
     async def retrieve_projects(self, query: str | None = None) -> RetrievalResult:
         if not self._settings.github_owner:
@@ -103,10 +106,21 @@ class ConfiguredPortfolioRetrievalService:
                     )
                     return RetrievalResult(
                         source=RetrievalSource.PROJECTS,
-                        content=_format_repositories([target_repo], readmes, focused=True),
+                        content=_format_repositories(
+                            [target_repo],
+                            readmes,
+                            focused=True,
+                            featured_projects=self._featured_projects,
+                            query=query,
+                        ),
                     )
 
-                selected_repos = repos[: self._settings.github_projects_limit]
+                selected_repos = _select_repositories(
+                    repos=repos,
+                    featured_projects=self._featured_projects,
+                    limit=self._settings.github_projects_limit,
+                    query=query,
+                )
                 readmes = await _fetch_repository_readmes(
                     client=client,
                     api_base_url=self._settings.github_api_base_url,
@@ -123,7 +137,12 @@ class ConfiguredPortfolioRetrievalService:
 
         return RetrievalResult(
             source=RetrievalSource.PROJECTS,
-            content=_format_repositories(selected_repos, readmes),
+            content=_format_repositories(
+                selected_repos,
+                readmes,
+                featured_projects=self._featured_projects,
+                query=query,
+            ),
         )
 
     async def retrieve_resume(self, path_override: str | None = None, query: str | None = None) -> RetrievalResult:
@@ -330,6 +349,42 @@ def _find_target_repository(query: str | None, repos: list[dict]) -> dict | None
     return None
 
 
+SUBJECTIVE_PROJECT_QUERY_PATTERN = re.compile(
+    r"\b(proud|favorite|favourite|flagship|best|standout|highlight|impressive)\b",
+    re.IGNORECASE,
+)
+
+
+def _select_repositories(
+    *,
+    repos: list[dict],
+    featured_projects: dict[str, FeaturedProject],
+    limit: int,
+    query: str | None,
+) -> list[dict]:
+    if not _is_subjective_project_query(query) or not featured_projects:
+        return repos[:limit]
+
+    featured_repos = [
+        repo
+        for repo in repos
+        if isinstance(repo.get("name"), str) and find_featured_project(repo["name"], featured_projects)
+    ]
+    selected = [*featured_repos]
+    selected_names = {repo.get("name") for repo in selected}
+    for repo in repos:
+        if len(selected) >= limit:
+            break
+        if repo.get("name") in selected_names:
+            continue
+        selected.append(repo)
+    return selected[:limit]
+
+
+def _is_subjective_project_query(query: str | None) -> bool:
+    return bool(query and SUBJECTIVE_PROJECT_QUERY_PATTERN.search(query))
+
+
 def _normalize_repo_match_text(value: str) -> str:
     return " ".join(token for token in _split_repo_match_text(value) if token)
 
@@ -338,9 +393,20 @@ def _split_repo_match_text(value: str) -> list[str]:
     return value.lower().replace("-", " ").replace("_", " ").replace(".", " ").split()
 
 
-def _format_repositories(repos: list[dict], readmes: dict[str, str] | None = None, focused: bool = False) -> str:
+def _format_repositories(
+    repos: list[dict],
+    readmes: dict[str, str] | None = None,
+    focused: bool = False,
+    featured_projects: dict[str, FeaturedProject] | None = None,
+    query: str | None = None,
+) -> str:
     readmes = readmes or {}
+    featured_projects = featured_projects or {}
     sections = ["Focused GitHub project:" if focused else "GitHub projects:"]
+    if _is_subjective_project_query(query) and featured_projects:
+        sections.append(
+            "Selection guidance: prefer projects marked as featured, flagship, or most proud when answering subjective project preference questions."
+        )
     for repo in repos:
         name = repo.get("name") or "unnamed"
         description = repo.get("description") or "No description provided."
@@ -366,10 +432,27 @@ def _format_repositories(repos: list[dict], readmes: dict[str, str] | None = Non
             f"  Metadata: {'; '.join(metadata)}\n"
             f"  URL: {url}"
         )
+        if featured_project := find_featured_project(name, featured_projects):
+            sections.append(_format_featured_project_note(featured_project))
         if readme := readmes.get(name):
             sections.append(f"  README excerpt:\n{_indent_readme_excerpt(readme)}")
 
     return "\n".join(sections)
+
+
+def _format_featured_project_note(project: FeaturedProject) -> str:
+    lines = ["  Featured project metadata:"]
+    if project.title:
+        lines.append(f"    Title: {project.title}")
+    if project.labels:
+        lines.append(f"    Labels: {', '.join(project.labels)}")
+    if project.summary:
+        lines.append(f"    Summary: {project.summary}")
+    if project.proud_reason:
+        lines.append(f"    Proud reason: {project.proud_reason}")
+    if project.impact:
+        lines.append(f"    Impact: {project.impact}")
+    return "\n".join(lines)
 
 
 def _indent_readme_excerpt(readme: str) -> str:

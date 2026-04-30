@@ -135,6 +135,7 @@ The first retrieval implementation uses:
 - vector-backed resume retrieval from Neon pgvector when `NEON_DATABASE_URL_STRING` is configured
 - local text/markdown files for `docs`
 - local file override for `resume` when an explicit `resume_path` is supplied
+- curated featured project metadata from `FEATURED_PROJECTS_PATH` for subjective project preference questions
 
 The graph dispatches only planned retrieval sources with LangGraph dynamic sends. Independent retrieval nodes can run concurrently, then join at `merge_normalize_context`.
 
@@ -149,7 +150,8 @@ Project retrieval strategy:
 - Current: fetch GitHub repository metadata for `GITHUB_OWNER`, excluding forks unless `GITHUB_INCLUDE_FORKS=true`.
 - Broad project questions format the most recent `GITHUB_PROJECTS_LIMIT` repositories and fetch bounded README excerpts when available.
 - Named project questions, including context-resolved follow-ups, focus retrieval on the matching repository and fetch a larger README excerpt for deeper answers.
-- Later: add pinned/featured project configuration, scoring, and cache policy.
+- Subjective project preference questions, such as "most proud of", "favorite", "flagship", or "most impressive", prioritize curated featured project metadata when available.
+- Later: optionally pull GitHub pinned repositories through GraphQL, add scoring, and add a cache policy.
 
 Problem solved: "what projects has this person built?" should not treat forked repositories as owned work.
 Project-specific questions should not dump unrelated repositories into context when the user clearly asks about one repo.
@@ -649,6 +651,18 @@ Decision: if `resume_path` is explicitly supplied, the retriever reads that loca
 Problem solved: the system can move toward production RAG behavior without losing the fast local testing path used by the CLI and tests.
 
 Trade-off: there are two resume retrieval paths during migration. This is acceptable because the override is explicit and easy to detect in traces/logs.
+
+---
+
+### 22. Add Curated Featured Project Metadata
+
+Problem: GitHub repository metadata can answer recency, language, README, and popularity questions, but it cannot reliably answer subjective questions such as "which project are you most proud of?".
+
+Decision: add a small tracked metadata file at `portfolio/featured_projects.json` and load it through `FEATURED_PROJECTS_PATH`. Project retrieval enriches matching repositories with featured labels, summary, proud reason, and impact. Subjective preference queries prioritize featured projects before recent repositories.
+
+Problem solved: "most proud", "favorite", "flagship", and similar questions now have an explicit human-authored preference signal instead of being accidentally determined by GitHub recency.
+
+Trade-off: this introduces curated portfolio data outside GitHub. That is intentional because subjective preference and narrative significance are not GitHub facts. The metadata file should stay small and should not become a second project database.
 
 ---
 

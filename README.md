@@ -119,6 +119,8 @@ Fill in `OPENAI_API_KEY`, `ASSISTANT_SUBJECT`, and optionally `GITHUB_OWNER` / `
 
 Project README enrichment is controlled by `GITHUB_README_MAX_CHARS` for broad project lists and `GITHUB_TARGET_README_MAX_CHARS` for focused named-repository retrieval. Repositories without a README still appear with their normal metadata.
 
+Featured project metadata is loaded from `FEATURED_PROJECTS_PATH`, defaulting to `portfolio/featured_projects.json`. This optional curated layer gives subjective questions such as "most proud of", "favorite", or "flagship project" an explicit preference signal instead of relying only on GitHub recency.
+
 For vector-backed resume answers, add your resume as:
 
 - `data/resume.md`

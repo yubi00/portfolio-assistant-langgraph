@@ -1,0 +1,10 @@
+[
+  {
+    "name": "ai-portfolio",
+    "title": "MCP Terminal Portfolio - yubi.sh",
+    "summary": "Interactive AI-powered portfolio where visitors explore projects, skills, and experience through a terminal-style conversational interface.",
+    "proud_reason": "This is the flagship personal portfolio project because it turns a static portfolio into a natural conversation, combining a terminal UI, LLM-backed answers, voice interaction, MCP tooling, streaming responses, and production observability.",
+    "impact": "It demonstrates end-to-end product thinking across frontend UX, backend AI orchestration, real-time voice, deployment, and cost-aware reliability controls.",
+    "labels": ["featured", "flagship", "most proud"]
+  }
+]

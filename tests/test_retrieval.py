@@ -215,6 +215,43 @@ async def test_project_retrieval_prefers_longest_repository_name(tmp_path, monke
     assert "- project-with-readme\n" not in result.content
 
 
+async def test_project_retrieval_prioritizes_featured_metadata_for_subjective_questions(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    metadata_path = tmp_path / "featured_projects.json"
+    metadata_path.write_text(
+        """[
+  {
+    "name": "project-without-readme",
+    "title": "Flagship Project",
+    "summary": "Curated flagship project summary.",
+    "proud_reason": "This project best represents the portfolio owner's product and engineering taste.",
+    "impact": "It combines frontend, backend, and AI delivery.",
+    "labels": ["featured", "most proud"]
+  }
+]""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(retrieval_module.httpx, "AsyncClient", lambda timeout: FakeGitHubClient())
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            GITHUB_OWNER="alex",
+            FEATURED_PROJECTS_PATH=str(metadata_path),
+        )
+    )
+
+    result = await service.retrieve_projects("What project are you most proud of?")
+
+    assert result.source == RetrievalSource.PROJECTS
+    assert result.error is None
+    assert result.content.index("- project-without-readme") < result.content.index("- project-with-readme")
+    assert "Selection guidance: prefer projects marked as featured" in result.content
+    assert "Proud reason: This project best represents" in result.content
+    assert "Labels: featured, most proud" in result.content
+
+
 async def test_resume_preload_logs_selected_source(tmp_path, caplog, monkeypatch):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
