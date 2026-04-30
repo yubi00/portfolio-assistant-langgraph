@@ -292,6 +292,17 @@ Notes:
 
 ---
 
+## Future SaaS Direction
+
+Status: documented for later, not part of the current backend hardening scope.
+
+Notes:
+- Longer-term SaaS direction lives in `SAAS_READINESS_PLAN.md`.
+- Do not build billing, multi-user onboarding, resume upload, or GitHub OAuth before the public security hardening phase is complete.
+- The immediate priority remains making this backend safe and stable enough to replace the old public system.
+
+---
+
 ## Smartness Roadmap
 
 This section tracks capability upgrades that make the assistant materially smarter without adding unnecessary orchestration complexity.
