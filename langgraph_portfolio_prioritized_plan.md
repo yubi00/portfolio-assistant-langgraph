@@ -252,15 +252,15 @@ Notes:
 ## Phase 13 - Public Production Hardening
 
 - MUST [x] Add deterministic policy guard before relevance classification
-- MUST [ ] Add route-level rate limiting for `/prompt` and `/prompt/stream`
-- MUST [ ] Add streaming concurrency protection
+- MUST [x] Add route-level rate limiting for `/prompt` and `/prompt/stream`
+- MUST [x] Add streaming concurrency protection
 - MUST [ ] Add public auth gate suitable for a portfolio site
 - MUST [ ] Add browser-friendly auth flow before enabling auth in production
 - MUST [ ] Add secure CORS/origin policy for public deployment
 - MUST [ ] Hide development-only docs/routes in production where appropriate
 - MUST [ ] Ensure client-visible errors do not leak internal service details
-- SHOULD [ ] Add request abuse logging and rate-limit hit logging
-- SHOULD [ ] Add security-focused tests around auth, rate limits, and streaming errors
+- SHOULD [x] Add request abuse logging and rate-limit hit logging
+- SHOULD [x] Add security-focused tests around auth, rate limits, and streaming errors
 - NICE [ ] Move rate-limit/session state to shared storage if deploying more than one instance
 
 Status: planned for public replacement readiness.
@@ -268,6 +268,10 @@ Status: planned for public replacement readiness.
 Notes:
 - `policy_guard` now blocks prompt injection, hidden prompt extraction, fake portfolio fabrication, secret/credential requests, and harmful-content requests before retrieval or answer generation.
 - Manual jailbreak smoke checks confirmed unsafe prompts now short-circuit at `policy_guard`, while normal portfolio queries continue through classification, retrieval, merge, and answer generation.
+- `/prompt` and `/prompt/stream` now use the maintained `limits` library for configurable in-process request rate limiting.
+- `/prompt/stream` also has an active-stream concurrency guard to protect long-running SSE responses.
+- HTTP API errors now use a stable `{error: {status, code, message}}` shape so clients can branch on error codes.
+- API-facing errors now extend a common `AppError` base class so status codes, machine-readable error codes, and safe messages are owned by typed errors instead of duplicated in route handlers.
 - Use the old `yubi-ai-portfolio-api` security hardening as reference material, not as code to copy blindly.
 - Auth is required before this replaces the old public system because the API can incur real OpenAI/GitHub cost.
 - Keep this separate from orchestration work so the graph remains simple and testable.

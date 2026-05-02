@@ -4,15 +4,20 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+from app.errors import AppError
 from app.graph.state import ConversationTurnState
 
 
-class SessionStoreError(Exception):
+class SessionStoreError(AppError):
     """Base session store error."""
 
 
 class SessionNotFoundError(SessionStoreError):
     """Raised when a session id is unknown or expired."""
+
+    status_code = 404
+    code = "SESSION_NOT_FOUND"
+    default_message = "Session was not found or has expired."
 
 
 @dataclass

@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from app import main as app_main
@@ -8,8 +10,21 @@ from app.main import create_app
 from app.schemas import PromptResponse
 
 
+def _build_test_settings(**overrides) -> Settings:
+    return Settings(_env_file=None, OPENAI_API_KEY="test", ASSISTANT_SUBJECT="Alex", **overrides)
+
+
 def _test_settings() -> Settings:
-    return Settings(_env_file=None, OPENAI_API_KEY="test", ASSISTANT_SUBJECT="Alex")
+    return _build_test_settings()
+
+
+def _assert_error(response, *, status: int, code: str, message: str | None = None) -> None:
+    assert response.status_code == status
+    body = response.json()
+    assert body["error"]["status"] == status
+    assert body["error"]["code"] == code
+    if message is not None:
+        assert body["error"]["message"] == message
 
 
 def test_prompt_route_creates_session_and_reuses_history(monkeypatch):
@@ -89,8 +104,8 @@ def test_prompt_route_returns_404_for_unknown_session(monkeypatch):
 
     response = client.post("/prompt", json={"prompt": "Hello", "session_id": "missing-session"})
 
-    assert response.status_code == 404
-    assert "was not found or has expired" in response.json()["detail"]
+    _assert_error(response, status=404, code="SESSION_NOT_FOUND")
+    assert "was not found or has expired" in response.json()["error"]["message"]
 
 
 def test_app_startup_initializes_graph(monkeypatch):
@@ -115,8 +130,17 @@ def test_create_app_returns_configuration_error_app_when_settings_are_invalid(mo
     client = TestClient(create_app())
     response = client.get("/")
 
-    assert response.status_code == 503
-    assert response.json() == {"detail": "Missing config"}
+    _assert_error(response, status=503, code="CONFIGURATION_ERROR", message="Missing config")
+
+
+def test_create_app_returns_configuration_error_app_for_invalid_rate_limit(monkeypatch):
+    monkeypatch.setattr(app_main, "require_settings", lambda: _build_test_settings(PROMPT_RATE_LIMIT="not-a-limit"))
+
+    client = TestClient(create_app())
+    response = client.get("/")
+
+    _assert_error(response, status=503, code="CONFIGURATION_ERROR")
+    assert "Invalid rate limit setting" in response.json()["error"]["message"]
 
 
 def test_prompt_stream_route_emits_sse_events(monkeypatch):
@@ -182,8 +206,42 @@ def test_prompt_route_returns_503_for_upstream_ai_failure(monkeypatch):
 
     response = client.post("/prompt", json={"prompt": "What projects has Alex built?"})
 
-    assert response.status_code == 503
-    assert response.json()["detail"] == "AI service failed during answer generation."
+    _assert_error(
+        response,
+        status=503,
+        code="UPSTREAM_SERVICE_ERROR",
+        message="AI service failed during answer generation.",
+    )
+
+
+def test_prompt_route_rate_limit_returns_429(monkeypatch):
+    async def fake_run_prompt(request, settings, *, request_id=None):
+        return PromptResponse(
+            answer="answer",
+            session_id=request.session_id,
+            history=[{"user": request.prompt, "assistant": "answer"}],
+            is_relevant=True,
+            intent="projects",
+            route="portfolio_query",
+            retrieval_sources=["projects"],
+            retrieval_reason="Project questions need project data.",
+            retrieval_errors=[],
+            rewritten_query=request.prompt,
+            node_trace=["ingest_user_message", "generate_answer"],
+        )
+
+    settings = lambda: _build_test_settings(PROMPT_RATE_LIMIT="1/minute")
+    monkeypatch.setattr(prompt_api, "run_prompt", fake_run_prompt)
+    monkeypatch.setattr(app_main, "require_settings", settings)
+
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = settings
+
+    first_response = client.post("/prompt", json={"prompt": "What projects has Alex built?"})
+    second_response = client.post("/prompt", json={"prompt": "What projects has Alex built?"})
+
+    assert first_response.status_code == 200
+    _assert_error(second_response, status=429, code="RATE_LIMIT_EXCEEDED", message="Rate limit exceeded.")
 
 
 def test_prompt_stream_emits_upstream_error_event(monkeypatch):
@@ -227,3 +285,73 @@ def test_prompt_stream_preserves_partial_answer_on_upstream_failure(monkeypatch)
     assert "event: error" in body
     assert '"detail": "AI service failed during answer streaming."' in body
     assert '"partial_answer": "First partial sentence. "' in body
+
+
+def test_prompt_stream_rate_limit_returns_429(monkeypatch):
+    async def fake_run_prompt_stream(request, settings, *, request_id=None):
+        yield {
+            "type": "answer_completed",
+            "data": PromptResponse(
+                answer="answer",
+                session_id=request.session_id,
+                history=[{"user": request.prompt, "assistant": "answer"}],
+                is_relevant=True,
+                intent="projects",
+                route="portfolio_query",
+                retrieval_sources=["projects"],
+                retrieval_reason="Project questions need project data.",
+                retrieval_errors=[],
+                rewritten_query=request.prompt,
+                node_trace=["ingest_user_message", "generate_answer"],
+            ).model_dump(),
+        }
+
+    settings = lambda: _build_test_settings(PROMPT_STREAM_RATE_LIMIT="1/minute")
+    monkeypatch.setattr(prompt_api, "run_prompt_stream", fake_run_prompt_stream)
+    monkeypatch.setattr(app_main, "require_settings", settings)
+
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = settings
+
+    first_response = client.post("/prompt/stream", json={"prompt": "What projects has Alex built?"})
+    second_response = client.post("/prompt/stream", json={"prompt": "What projects has Alex built?"})
+
+    assert first_response.status_code == 200
+    _assert_error(second_response, status=429, code="RATE_LIMIT_EXCEEDED", message="Rate limit exceeded.")
+
+
+def test_prompt_stream_concurrency_limit_returns_429(monkeypatch):
+    async def fake_run_prompt_stream(request, settings, *, request_id=None):
+        yield {
+            "type": "answer_completed",
+            "data": PromptResponse(
+                answer="answer",
+                session_id=request.session_id,
+                history=[{"user": request.prompt, "assistant": "answer"}],
+                is_relevant=True,
+                intent="projects",
+                route="portfolio_query",
+                retrieval_sources=["projects"],
+                retrieval_reason="Project questions need project data.",
+                retrieval_errors=[],
+                rewritten_query=request.prompt,
+                node_trace=["ingest_user_message", "generate_answer"],
+            ).model_dump(),
+        }
+
+    settings = lambda: _build_test_settings(MAX_ACTIVE_STREAMS_PER_CLIENT=1)
+    monkeypatch.setattr(prompt_api, "run_prompt_stream", fake_run_prompt_stream)
+    monkeypatch.setattr(app_main, "require_settings", settings)
+
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = settings
+    asyncio.run(client.app.state.active_stream_registry.acquire("testclient", 1))
+
+    response = client.post("/prompt/stream", json={"prompt": "What projects has Alex built?"})
+
+    _assert_error(
+        response,
+        status=429,
+        code="STREAM_CONCURRENCY_LIMIT_EXCEEDED",
+        message="Too many active streams.",
+    )

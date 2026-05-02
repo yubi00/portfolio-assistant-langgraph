@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     session_ttl_minutes: int = Field(default=30, validation_alias="SESSION_TTL_MINUTES")
     stream_chunk_buffer_chars: int = Field(default=48, validation_alias="STREAM_CHUNK_BUFFER_CHARS")
 
+    rate_limit_enabled: bool = Field(default=True, validation_alias="RATE_LIMIT_ENABLED")
+    prompt_rate_limit: str = Field(default="30/minute", validation_alias="PROMPT_RATE_LIMIT")
+    prompt_stream_rate_limit: str = Field(default="10/minute", validation_alias="PROMPT_STREAM_RATE_LIMIT")
+    max_active_streams_per_client: int = Field(default=2, validation_alias="MAX_ACTIVE_STREAMS_PER_CLIENT")
+
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
     log_color: bool = Field(default=True, validation_alias="LOG_COLOR")
     log_format: str = Field(default="text", validation_alias="LOG_FORMAT")

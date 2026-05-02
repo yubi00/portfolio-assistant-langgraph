@@ -4,13 +4,22 @@ from collections.abc import AsyncIterator
 from time import perf_counter
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.config import Settings, get_settings
-from app.errors import UpstreamServiceError
+from app.errors import (
+    AppError,
+    BadRequestError,
+    PromptProcessingError,
+    RateLimitExceededError,
+    StreamConcurrencyLimitExceededError,
+    UpstreamServiceError,
+    app_error_response,
+)
 from app.schemas import ConversationTurn, PromptRequest, PromptResponse
 from app.services.prompt_runner import run_prompt, run_prompt_stream
+from app.services.rate_limit import ActiveStreamRegistry, client_key_from_request, rate_limit_guard
 from app.services.session_store import InMemorySessionStore, SessionNotFoundError
 
 router = APIRouter()
@@ -24,19 +33,28 @@ STREAM_HEADERS = {
 
 @router.post("/prompt", response_model=PromptResponse)
 async def prompt(
-    request: PromptRequest,
-    http_request: Request,
+    payload: PromptRequest,
+    request: Request,
     settings: Settings = Depends(get_settings),
-) -> PromptResponse:
+) -> PromptResponse | JSONResponse:
     request_id = _new_request_id()
     started_at = perf_counter()
+    client_key = client_key_from_request(request)
+    if not rate_limit_guard.hit_prompt(client_key):
+        logger.warning(
+            "prompt request rejected | request_id=%s | status=429 | client=%s | reason=rate_limit",
+            request_id,
+            client_key,
+        )
+        return _app_error_response(RateLimitExceededError())
+
     try:
-        session_store, session_id, effective_request = _prepare_effective_request(request, http_request)
+        session_store, session_id, effective_request = _prepare_effective_request(payload, request)
         logger.info(
             "prompt request started | request_id=%s | session_id=%s | prompt=%r",
             request_id,
             session_id,
-            _shorten(request.prompt),
+            _shorten(payload.prompt),
         )
         response = await run_prompt(effective_request, settings, request_id=request_id)
         session_store.set_history(session_id, [turn.model_dump() for turn in response.history])
@@ -50,78 +68,61 @@ async def prompt(
         )
         return response
     except SessionNotFoundError as exc:
-        logger.warning(
-            "prompt request failed | request_id=%s | session_id=%s | status=404 | detail=%s",
-            request_id,
-            request.session_id,
-            exc,
-        )
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _handle_app_error("prompt request failed", request_id, payload.session_id, exc)
     except ValueError as exc:
-        logger.warning(
-            "prompt request failed | request_id=%s | session_id=%s | status=400 | detail=%s",
-            request_id,
-            request.session_id,
-            exc,
-        )
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _handle_app_error("prompt request failed", request_id, payload.session_id, BadRequestError(str(exc)))
     except UpstreamServiceError as exc:
-        logger.warning(
-            "prompt request failed | request_id=%s | session_id=%s | status=503 | detail=%s",
-            request_id,
-            request.session_id,
-            exc,
-        )
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return _handle_app_error("prompt request failed", request_id, payload.session_id, exc)
     except Exception as exc:
         logger.exception(
             "prompt request failed | request_id=%s | session_id=%s | status=500",
             request_id,
-            request.session_id,
+            payload.session_id,
         )
-        raise HTTPException(status_code=500, detail="Prompt processing failed.") from exc
+        return _app_error_response(PromptProcessingError())
 
 
-@router.post("/prompt/stream")
+@router.post("/prompt/stream", response_model=None)
 async def prompt_stream(
-    request: PromptRequest,
-    http_request: Request,
+    payload: PromptRequest,
+    request: Request,
     settings: Settings = Depends(get_settings),
-) -> StreamingResponse:
+) -> StreamingResponse | JSONResponse:
     request_id = _new_request_id()
     started_at = perf_counter()
+    client_key = client_key_from_request(request)
+    if not rate_limit_guard.hit_prompt_stream(client_key):
+        logger.warning(
+            "prompt stream rejected | request_id=%s | status=429 | client=%s | reason=rate_limit",
+            request_id,
+            client_key,
+        )
+        return _app_error_response(RateLimitExceededError())
+
     try:
-        session_store, session_id, effective_request = _prepare_effective_request(request, http_request)
+        session_store, session_id, effective_request = _prepare_effective_request(payload, request)
     except SessionNotFoundError as exc:
-        logger.warning(
-            "prompt stream failed | request_id=%s | session_id=%s | status=404 | detail=%s",
-            request_id,
-            request.session_id,
-            exc,
-        )
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _handle_app_error("prompt stream failed", request_id, payload.session_id, exc)
     except ValueError as exc:
-        logger.warning(
-            "prompt stream failed | request_id=%s | session_id=%s | status=400 | detail=%s",
-            request_id,
-            request.session_id,
-            exc,
-        )
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _handle_app_error("prompt stream failed", request_id, payload.session_id, BadRequestError(str(exc)))
     except UpstreamServiceError as exc:
+        return _handle_app_error("prompt stream failed", request_id, payload.session_id, exc)
+
+    active_stream_registry: ActiveStreamRegistry = request.app.state.active_stream_registry
+    if not await active_stream_registry.acquire(client_key, settings.max_active_streams_per_client):
         logger.warning(
-            "prompt stream failed | request_id=%s | session_id=%s | status=503 | detail=%s",
+            "prompt stream rejected | request_id=%s | session_id=%s | status=429 | client=%s | reason=stream_concurrency_limit",
             request_id,
-            request.session_id,
-            exc,
+            session_id,
+            client_key,
         )
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return _app_error_response(StreamConcurrencyLimitExceededError())
 
     logger.info(
         "prompt stream started | request_id=%s | session_id=%s | prompt=%r",
         request_id,
         session_id,
-        _shorten(request.prompt),
+        _shorten(payload.prompt),
     )
 
     return StreamingResponse(
@@ -129,7 +130,9 @@ async def prompt_stream(
             effective_request,
             settings,
             session_store,
+            active_stream_registry,
             session_id,
+            client_key,
             request_id=request_id,
             started_at=started_at,
         ),
@@ -159,7 +162,9 @@ async def _stream_prompt_response(
     request: PromptRequest,
     settings: Settings,
     session_store: InMemorySessionStore,
+    active_stream_registry: ActiveStreamRegistry,
     session_id: str,
+    client_key: str,
     request_id: str,
     started_at: float,
 ) -> AsyncIterator[str]:
@@ -250,10 +255,34 @@ async def _stream_prompt_response(
                 "partial_answer": "".join(partial_answer_parts),
             },
         )
+    finally:
+        await active_stream_registry.release(client_key)
 
 
 def _format_sse_event(event_name: str, data: dict) -> str:
     return f"event: {event_name}\ndata: {json.dumps(data)}\n\n"
+
+
+def _app_error_response(error: AppError) -> JSONResponse:
+    return JSONResponse(status_code=error.status_code, content=app_error_response(error))
+
+
+def _handle_app_error(
+    log_message: str,
+    request_id: str,
+    session_id: str | None,
+    error: AppError,
+) -> JSONResponse:
+    logger.warning(
+        "%s | request_id=%s | session_id=%s | status=%s | code=%s | detail=%s",
+        log_message,
+        request_id,
+        session_id,
+        error.status_code,
+        error.code,
+        error.message,
+    )
+    return _app_error_response(error)
 
 
 def _new_request_id() -> str:

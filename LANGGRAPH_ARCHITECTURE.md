@@ -19,6 +19,7 @@ Implemented phases:
 - Phase 12A/B: offline resume embedding ingestion, Neon pgvector storage, semantic resume chunking, and vector-backed resume retrieval
 - Clarification guard rail: deterministic ambiguity detection for risky follow-up references
 - Policy guard: deterministic blocking for prompt injection, prompt extraction, unsafe fabrication, secrets, and harmful-content requests
+- Public API protection: in-process request rate limiting and active stream concurrency limiting
 
 Not implemented yet:
 
@@ -39,6 +40,7 @@ flowchart LR
     Runner["Prompt Runner\ntransport-independent"]
     Graph["LangGraph StateGraph"]
     Policy["Policy Guard\ndeterministic"]
+    Protection["API Protection\nrate limits + stream concurrency"]
     Sessions["InMemorySessionStore\nsession_id -> history"]
     OpenAI["OpenAI via\nlangchain-openai"]
     Neon["Neon Postgres\npgvector"]
@@ -52,6 +54,8 @@ flowchart LR
     CLI --> Runner
     API --> Runner
     StreamAPI --> Runner
+    API --> Protection
+    StreamAPI --> Protection
     Runner --> Graph
     Graph --> Policy
     API --> Sessions
@@ -139,6 +143,58 @@ LangGraph is not responsible for:
 - preventing unsafe prompts without our guard logic
 
 Those behaviors come from the harness. LangGraph makes them easier to compose and observe.
+
+---
+
+## Public API Protection
+
+The public API now has two lightweight abuse-protection layers before expensive assistant work runs:
+
+- request rate limiting for `/prompt`
+- request rate limiting plus active stream concurrency limiting for `/prompt/stream`
+
+Rate limiting uses the maintained `limits` library with `MemoryStorage` and a fixed-window strategy. The project does not hand-roll rate-limit counters or time-window math.
+
+Configuration:
+
+| Setting | Default | Meaning |
+|---|---:|---|
+| `RATE_LIMIT_ENABLED` | `true` | Enables/disables request rate limits |
+| `PROMPT_RATE_LIMIT` | `30/minute` | Max `/prompt` requests per client |
+| `PROMPT_STREAM_RATE_LIMIT` | `10/minute` | Max `/prompt/stream` requests per client |
+| `MAX_ACTIVE_STREAMS_PER_CLIENT` | `2` | Max concurrent active SSE streams per client |
+
+HTTP errors use a structured response contract:
+
+```json
+{
+  "error": {
+    "status": 429,
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Rate limit exceeded."
+  }
+}
+```
+
+API-facing errors are represented internally with a common `AppError` base class. Each concrete error owns its HTTP status, stable machine-readable code, and safe client message. Route handlers convert `AppError` instances into the response contract above, instead of duplicating error-shape logic per endpoint.
+
+Current HTTP error codes include:
+
+| Code | Meaning |
+|---|---|
+| `CONFIGURATION_ERROR` | Application configuration is invalid |
+| `BAD_REQUEST` | Request validation or prompt input failed |
+| `SESSION_NOT_FOUND` | Supplied `session_id` does not exist or expired |
+| `UPSTREAM_SERVICE_ERROR` | Upstream AI service failed |
+| `PROMPT_PROCESSING_FAILED` | Unexpected prompt processing failure |
+| `RATE_LIMIT_EXCEEDED` | Request rate limit exceeded |
+| `STREAM_CONCURRENCY_LIMIT_EXCEEDED` | Too many active SSE streams for one client |
+
+Decision: use in-memory rate limiting for the first public-hardening cut.
+
+Problem solved: the public API can trigger OpenAI, GitHub, and vector-store work. Rate limits and stream caps reduce accidental cost spikes and basic abuse before auth is implemented.
+
+Trade-off: in-memory limits are process-local. They are fine for a single-instance deployment, but they do not coordinate across multiple replicas. If this service runs horizontally, the rate-limit storage should move to shared infrastructure such as Redis.
 
 ---
 

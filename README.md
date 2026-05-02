@@ -18,6 +18,7 @@ This implementation's architecture and decision log live in `LANGGRAPH_ARCHITECT
 - SSE streaming via `POST /prompt/stream`
 - request/session-aware logging with optional JSON log format
 - basic upstream reliability controls with retries, timeouts, and streaming partial-answer preservation
+- public API abuse protection with request rate limits and active stream concurrency limits
 
 ## What Makes It Special
 
@@ -228,6 +229,41 @@ The app now applies basic reliability controls to OpenAI-backed graph steps:
 - non-streaming `/prompt` returns `503` for upstream AI-service failures
 - streaming `/prompt/stream` emits an `error` SSE event with the upstream failure detail
 - when a stream fails after partial output, the `error` event includes `partial_answer`
+
+## Public API Protection
+
+The API applies lightweight in-process abuse protection:
+
+- `/prompt` rate limit via `PROMPT_RATE_LIMIT`
+- `/prompt/stream` rate limit via `PROMPT_STREAM_RATE_LIMIT`
+- active SSE stream concurrency limit via `MAX_ACTIVE_STREAMS_PER_CLIENT`
+
+Defaults:
+
+```powershell
+RATE_LIMIT_ENABLED=true
+PROMPT_RATE_LIMIT=30/minute
+PROMPT_STREAM_RATE_LIMIT=10/minute
+MAX_ACTIVE_STREAMS_PER_CLIENT=2
+```
+
+Rate limiting uses the maintained `limits` library with in-memory storage. This is appropriate for the current single-instance deployment path. If the API is deployed across multiple instances, move rate-limit state to shared storage such as Redis.
+
+HTTP API errors use a stable structured shape:
+
+```json
+{
+  "error": {
+    "status": 429,
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Rate limit exceeded."
+  }
+}
+```
+
+Internally, API-facing failures extend a common `AppError` base class with `status_code`, `code`, and `message`. This keeps route handlers from inventing one-off response shapes as new errors are added.
+
+Frontend clients should branch on `error.code`, not raw message text.
 
 ## Current Limitation
 
