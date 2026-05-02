@@ -76,6 +76,72 @@ The streaming route keeps this boundary intact: SSE framing stays in `app.api.pr
 
 ---
 
+## Agent Harness Design
+
+This project is not relying on LangGraph as a magic agent layer. LangGraph provides the orchestration runtime, but the assistant behavior comes from the harness built around it.
+
+The harness is the set of contracts, boundaries, deterministic checks, retrieval services, prompt contracts, and response-shaping rules that make the assistant reliable.
+
+### Harness Responsibilities
+
+| Harness Layer | Implementation | Responsibility |
+|---|---|---|
+| Transport boundary | CLI, FastAPI, `app.services.prompt_runner` | Keep CLI, non-streaming API, and streaming API on the same graph-backed behavior |
+| State contract | `PortfolioState` | Carry query, rewritten query, policy status, route, intent, retrieval plan, retrieved context, answer, memory, and trace |
+| Orchestration runtime | LangGraph `StateGraph` | Execute nodes, conditional routes, retrieval fan-out, merge, and memory save in an inspectable order |
+| Prompt contracts | `app/prompts/*.md` | Keep each LLM call focused on one decision instead of asking one giant prompt to do everything |
+| Structured LLM outputs | `RelevanceDecision`, `RetrievalPlan` | Convert LLM decisions into typed route/source data that the graph can safely branch on |
+| Deterministic guard rails | `policy_guard`, `check_ambiguity`, context bounds | Keep cheap, testable logic outside the LLM when the behavior does not require generation |
+| Retrieval layer | `ConfiguredPortfolioRetrievalService`, GitHub, README enrichment, featured metadata, resume pgvector, docs | Provide grounded evidence instead of asking the model to rely on memory or inference |
+| Memory/session layer | API session store, bounded `messages`, `save_memory` | Support follow-up questions without unbounded context growth |
+| Observability | node traces, request/session logging, streaming progress events | Make each decision and route visible during CLI/API debugging |
+
+### Why This Matters
+
+A single-prompt assistant would have to classify relevance, resolve follow-ups, decide sources, retrieve facts, avoid jailbreaks, merge evidence, answer, and remember the turn all inside one opaque model call.
+
+This harness splits those responsibilities into smaller units:
+
+- `resolve_context` turns follow-up questions into standalone questions when history is available.
+- `policy_guard` blocks obvious unsafe prompt patterns before classification or retrieval.
+- `classify_relevance` decides whether the request belongs to the portfolio domain.
+- `check_ambiguity` asks for clarification when a follow-up reference cannot be safely resolved.
+- `plan_retrieval` selects the smallest useful source set.
+- retrieval nodes fetch evidence only from planned sources.
+- `merge_normalize_context` bounds and labels evidence.
+- `generate_answer` answers only from the merged context.
+- `save_memory` stores the completed turn within a bounded session window.
+
+Decision: keep the assistant as a simple, explicit harness rather than a general autonomous agent.
+
+Problem solved: portfolio Q&A needs reliable grounding, follow-up handling, public-safety boundaries, and traceability more than it needs open-ended tool use or recursive planning.
+
+Trade-off: this design uses multiple small steps, so relevant requests can require more than one LLM call. The benefit is that each decision is inspectable, testable, and replaceable. If latency becomes a real issue, context resolution, classification, and retrieval planning can be optimized or selectively combined without changing the whole architecture.
+
+### LangGraph's Role
+
+LangGraph is responsible for:
+
+- explicit node execution
+- conditional routing
+- state accumulation
+- parallel retrieval fan-out through dynamic sends
+- graph-level streaming metadata
+- traceable orchestration
+
+LangGraph is not responsible for:
+
+- deciding the product boundary
+- enforcing the grounding policy by itself
+- choosing retrieval quality rules
+- designing prompt contracts
+- implementing session semantics
+- preventing unsafe prompts without our guard logic
+
+Those behaviors come from the harness. LangGraph makes them easier to compose and observe.
+
+---
+
 ## Current Graph
 
 ```mermaid
