@@ -251,6 +251,7 @@ Notes:
 
 ## Phase 13 - Public Production Hardening
 
+- MUST [x] Add deterministic policy guard before relevance classification
 - MUST [ ] Add route-level rate limiting for `/prompt` and `/prompt/stream`
 - MUST [ ] Add streaming concurrency protection
 - MUST [ ] Add public auth gate suitable for a portfolio site
@@ -265,6 +266,8 @@ Notes:
 Status: planned for public replacement readiness.
 
 Notes:
+- `policy_guard` now blocks prompt injection, hidden prompt extraction, fake portfolio fabrication, secret/credential requests, and harmful-content requests before retrieval or answer generation.
+- Manual jailbreak smoke checks confirmed unsafe prompts now short-circuit at `policy_guard`, while normal portfolio queries continue through classification, retrieval, merge, and answer generation.
 - Use the old `yubi-ai-portfolio-api` security hardening as reference material, not as code to copy blindly.
 - Auth is required before this replaces the old public system because the API can incur real OpenAI/GitHub cost.
 - Keep this separate from orchestration work so the graph remains simple and testable.

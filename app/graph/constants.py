@@ -4,6 +4,7 @@ from enum import StrEnum
 class NodeName(StrEnum):
     INGEST_USER_MESSAGE = "ingest_user_message"
     RESOLVE_CONTEXT = "resolve_context"
+    POLICY_GUARD = "policy_guard"
     CLASSIFY_RELEVANCE = "classify_relevance"
     CHECK_AMBIGUITY = "check_ambiguity"
     PLAN_RETRIEVAL = "plan_retrieval"

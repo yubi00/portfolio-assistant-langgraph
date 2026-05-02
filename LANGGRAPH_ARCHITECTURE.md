@@ -18,6 +18,7 @@ Implemented phases:
 - Phase 8A: SSE streaming route reusing the existing prompt runner and graph-level answer-token streaming
 - Phase 12A/B: offline resume embedding ingestion, Neon pgvector storage, semantic resume chunking, and vector-backed resume retrieval
 - Clarification guard rail: deterministic ambiguity detection for risky follow-up references
+- Policy guard: deterministic blocking for prompt injection, prompt extraction, unsafe fabrication, secrets, and harmful-content requests
 
 Not implemented yet:
 
@@ -37,6 +38,7 @@ flowchart LR
     StreamAPI["FastAPI\nPOST /prompt/stream"]
     Runner["Prompt Runner\ntransport-independent"]
     Graph["LangGraph StateGraph"]
+    Policy["Policy Guard\ndeterministic"]
     Sessions["InMemorySessionStore\nsession_id -> history"]
     OpenAI["OpenAI via\nlangchain-openai"]
     Neon["Neon Postgres\npgvector"]
@@ -51,6 +53,7 @@ flowchart LR
     API --> Runner
     StreamAPI --> Runner
     Runner --> Graph
+    Graph --> Policy
     API --> Sessions
     StreamAPI --> Sessions
     Sessions --> API
@@ -79,7 +82,10 @@ The streaming route keeps this boundary intact: SSE framing stays in `app.api.pr
 flowchart TD
     START([START]) --> Ingest[ingest_user_message]
     Ingest --> Resolve[resolve_context]
-    Resolve --> Classify[classify_relevance]
+    Resolve --> Policy[policy_guard]
+
+    Policy -->|allowed| Classify[classify_relevance]
+    Policy -->|blocked| Friendly[friendly_response]
 
     Classify -->|portfolio_query| Ambiguity[check_ambiguity]
     Classify -->|off_topic| Friendly[friendly_response]
@@ -108,6 +114,24 @@ flowchart TD
 | `off_topic` | The user asks for general knowledge, coding/debugging help, or work on their own project. | `friendly_response` |
 
 This route split exists because a boolean `is_relevant` flag was too coarse. Portfolio identity questions such as "who are you?" now flow through the normal portfolio retrieval path, while only genuinely unrelated prompts go to `off_topic`.
+
+### Policy Guard
+
+The graph runs `policy_guard` after context resolution and before relevance classification.
+
+It is intentionally deterministic rather than another LLM call. The guard blocks obvious unsafe prompt patterns before they can influence source planning or retrieval:
+
+- instruction override attempts such as "ignore previous instructions"
+- hidden prompt or developer-message extraction
+- fabricated portfolio claims such as fake projects, fake experience, or fake resume facts
+- secret or credential requests such as API keys, access tokens, private keys, or passwords
+- harmful-content requests such as malware, phishing, ransomware, keyloggers, and credential theft
+
+Decision: keep this as a narrow first-pass safety boundary.
+
+Problem solved: portfolio-framed jailbreak prompts can otherwise pass relevance classification because they mention the portfolio subject. The policy guard catches the unsafe intent before the assistant spends tokens on classification, retrieval planning, or retrieval.
+
+Trade-off: deterministic patterns can miss novel jailbreak phrasing and can occasionally over-block. This is acceptable for the first public-hardening step because it is cheap, explainable, testable, and complements the existing grounded-answer rule. A later phase can add a small LLM-backed safety classifier or evaluation corpus if needed.
 
 ### Retrieval Sources
 

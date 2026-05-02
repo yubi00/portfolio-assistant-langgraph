@@ -10,6 +10,30 @@ from app.graph.state import PortfolioState
 logger = logging.getLogger("app.graph.routing")
 
 
+def route_after_policy_guard(state: PortfolioState) -> Literal["allowed", "blocked"]:
+    request_fragment = f" | request_id={state['request_id']}" if state.get("request_id") else ""
+    session_fragment = f" | session_id={state['session_id']}" if state.get("session_id") else ""
+    if state.get("policy_violation"):
+        logger.info(
+            "=> %-22s | destination=%s | reason=%s%s%s",
+            "edge policy",
+            NodeName.FRIENDLY_RESPONSE.value,
+            state.get("policy_reason"),
+            request_fragment,
+            session_fragment,
+        )
+        return "blocked"
+
+    logger.info(
+        "=> %-22s | destination=%s%s%s",
+        "edge policy",
+        NodeName.CLASSIFY_RELEVANCE.value,
+        request_fragment,
+        session_fragment,
+    )
+    return "allowed"
+
+
 def route_after_relevance(state: PortfolioState) -> Literal["portfolio_query", "off_topic"]:
     route = state.get("route")
     if route == RouteName.PORTFOLIO_QUERY or state.get("is_relevant"):

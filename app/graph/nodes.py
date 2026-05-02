@@ -48,6 +48,24 @@ class PortfolioGraphNodes:
             "node_trace": [NodeName.RESOLVE_CONTEXT],
         }
 
+    @log_node(NodeName.POLICY_GUARD)
+    async def policy_guard(self, state: PortfolioState) -> dict:
+        policy_reason = _detect_policy_violation(state["rewritten_query"])
+        if policy_reason:
+            return {
+                "policy_violation": True,
+                "policy_reason": policy_reason,
+                "is_relevant": False,
+                "intent": "policy_violation",
+                "route": "off_topic",
+                "node_trace": [NodeName.POLICY_GUARD],
+            }
+
+        return {
+            "policy_violation": False,
+            "node_trace": [NodeName.POLICY_GUARD],
+        }
+
     @log_node(NodeName.CLASSIFY_RELEVANCE)
     async def classify_relevance(self, state: PortfolioState) -> dict:
         decision = await self._assistant_service.classify_relevance(
@@ -203,6 +221,65 @@ def _result_update(result: RetrievalResult, context_key: str, node_name: NodeNam
     if result.error:
         update["retrieval_errors"] = [result.error]
     return update
+
+
+POLICY_VIOLATION_PATTERNS = (
+    (
+        "instruction_override",
+        re.compile(
+            r"\b(ignore|disregard|bypass|override|forget)\b.{0,80}\b("
+            r"previous|prior|above|system|developer|instructions?|rules?|prompt"
+            r")\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    (
+        "prompt_extraction",
+        re.compile(
+            r"\b("
+            r"system prompt|hidden (?:prompt|instructions?|developer messages?)|"
+            r"developer messages?|exact instructions?|print .*instructions?"
+            r")\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    (
+        "portfolio_fabrication",
+        re.compile(
+            r"\b("
+            r"pretend|invent|fabricate|make up|fake"
+            r")\b.{0,100}\b("
+            r"portfolio|project|experience|resume|recruiters?|built|worked"
+            r")\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    (
+        "secret_or_credential_request",
+        re.compile(
+            r"\b("
+            r"aws root keys?|api keys?|access tokens?|secret keys?|credentials?|passwords?|private keys?"
+            r")\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "harmful_content",
+        re.compile(
+            r"\b("
+            r"malware|ransomware|keylogger|phishing|credential theft|steal credentials|banking trojan"
+            r")\b",
+            re.IGNORECASE,
+        ),
+    ),
+)
+
+
+def _detect_policy_violation(query: str) -> str | None:
+    for reason, pattern in POLICY_VIOLATION_PATTERNS:
+        if pattern.search(query):
+            return reason
+    return None
 
 
 AMBIGUOUS_REFERENCE_PATTERNS = (

@@ -8,6 +8,7 @@ This implementation's architecture and decision log live in `LANGGRAPH_ARCHITECT
 
 - grounded portfolio Q&A across `projects`, `resume`, and `docs`
 - history-aware contextual follow-up handling
+- deterministic policy guard for prompt injection, prompt extraction, unsafe fabrication, secrets, and harmful-content requests
 - clarification guard rail for genuinely ambiguous follow-up references
 - explicit retrieval planning before answer generation
 - targeted GitHub project deep dives when a query names a specific repository
@@ -37,7 +38,7 @@ What makes it different:
 - FastAPI application
 - `uv` project setup
 - LangGraph `StateGraph`
-- Nodes for ingest, context resolution, relevance classification, ambiguity checking, retrieval planning, retrieval, context merge, answer generation, clarification response, and friendly off-topic responses
+- Nodes for ingest, context resolution, policy guard, relevance classification, ambiguity checking, retrieval planning, retrieval, context merge, answer generation, clarification response, and friendly off-topic responses
 - Conditional routing for portfolio and off-topic prompts
 - Real OpenAI calls through `langchain-openai`
 - File-backed system prompts under `app/prompts/`
@@ -50,6 +51,8 @@ The graph uses explicit route categories rather than a loose yes/no classifier:
 - `off_topic`: general knowledge, coding/debugging help, or requests to work on the user's own project
 
 This mirrors the production assistant boundary: it may discuss whether the portfolio subject has relevant experience, but it should not become a general coding assistant.
+
+Before relevance classification, the graph runs a lightweight deterministic policy guard. It blocks common jailbreak and abuse patterns such as instruction override attempts, hidden prompt extraction, fake portfolio claims, secret/credential requests, and harmful-content requests. This keeps obvious unsafe prompts out of retrieval and answer generation without adding another LLM call.
 
 ## Phase 2 Retrieval Planning
 

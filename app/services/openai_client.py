@@ -93,6 +93,13 @@ class OpenAIAssistantClient:
             raise UpstreamServiceError("AI service failed during answer streaming.") from exc
 
     def build_friendly_response(self, assistant_subject: str, intent: str | None = None) -> str:
+        if intent == "policy_violation":
+            return (
+                "I can't help with requests to override instructions, reveal hidden prompts, "
+                "fabricate portfolio facts, expose secrets, or create harmful content. "
+                f"I can still answer grounded questions about {assistant_subject}'s portfolio, "
+                "projects, experience, skills, or professional background."
+            )
         if intent == "user_task":
             return (
                 "I can't debug or work on your project from here. I can help with questions about "

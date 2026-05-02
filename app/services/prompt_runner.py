@@ -125,6 +125,7 @@ def _merge_stream_updates(state_updates: dict, updates: dict) -> None:
 
 PROGRESS_STEP_BY_NODE = {
     NodeName.RESOLVE_CONTEXT.value: "context_resolved",
+    NodeName.POLICY_GUARD.value: "policy_checked",
     NodeName.CLASSIFY_RELEVANCE.value: "relevance_classified",
     NodeName.CHECK_AMBIGUITY.value: "ambiguity_checked",
     NodeName.PLAN_RETRIEVAL.value: "retrieval_planned",

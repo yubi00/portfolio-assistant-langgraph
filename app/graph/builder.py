@@ -5,7 +5,12 @@ from langgraph.graph import END, START, StateGraph
 from app.config import get_settings
 from app.graph.constants import NodeName, RouteName
 from app.graph.nodes import PortfolioGraphNodes
-from app.graph.routing import route_after_ambiguity, route_after_relevance, route_to_retrievers
+from app.graph.routing import (
+    route_after_ambiguity,
+    route_after_policy_guard,
+    route_after_relevance,
+    route_to_retrievers,
+)
 from app.graph.state import PortfolioState
 from app.services.assistant import AssistantService
 from app.services.openai_client import OpenAIAssistantClient
@@ -28,6 +33,7 @@ def build_portfolio_graph(
 
     builder.add_node(NodeName.INGEST_USER_MESSAGE, nodes.ingest_user_message)
     builder.add_node(NodeName.RESOLVE_CONTEXT, nodes.resolve_context)
+    builder.add_node(NodeName.POLICY_GUARD, nodes.policy_guard)
     builder.add_node(NodeName.CLASSIFY_RELEVANCE, nodes.classify_relevance)
     builder.add_node(NodeName.CHECK_AMBIGUITY, nodes.check_ambiguity)
     builder.add_node(NodeName.PLAN_RETRIEVAL, nodes.plan_retrieval)
@@ -42,7 +48,15 @@ def build_portfolio_graph(
 
     builder.add_edge(START, NodeName.INGEST_USER_MESSAGE)
     builder.add_edge(NodeName.INGEST_USER_MESSAGE, NodeName.RESOLVE_CONTEXT)
-    builder.add_edge(NodeName.RESOLVE_CONTEXT, NodeName.CLASSIFY_RELEVANCE)
+    builder.add_edge(NodeName.RESOLVE_CONTEXT, NodeName.POLICY_GUARD)
+    builder.add_conditional_edges(
+        NodeName.POLICY_GUARD,
+        route_after_policy_guard,
+        {
+            "allowed": NodeName.CLASSIFY_RELEVANCE,
+            "blocked": NodeName.FRIENDLY_RESPONSE,
+        },
+    )
     builder.add_conditional_edges(
         NodeName.CLASSIFY_RELEVANCE,
         route_after_relevance,
