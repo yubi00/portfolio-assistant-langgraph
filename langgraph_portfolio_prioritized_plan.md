@@ -301,10 +301,13 @@ Notes:
 - MUST [ ] Build or adapt a React client against the LangGraph API contract
 - MUST [ ] Implement non-streaming `/prompt` adapter for the LangGraph response shape
 - MUST [ ] Implement `/prompt/stream` SSE adapter for LangGraph event names
+- MUST [ ] Handle streaming payloads: `session_started`, `progress`, `answer_chunk`, `answer_completed`, and `error`
 - MUST [ ] Map backend progress events to safe user-facing status labels
 - MUST [ ] Preserve `session_id` reuse for follow-up questions
+- MUST [ ] Render `suggested_prompts` after completed answers when present
 - MUST [ ] Hide raw graph internals from the public UI
-- SHOULD [ ] Implement browser auth client for `/auth/session`, `/auth/token`, and bearer-token prompt calls
+- SHOULD [ ] Implement browser auth client for `/auth/session`, `/auth/token`, Turnstile, HttpOnly refresh cookie, and bearer-token prompt calls
+- SHOULD [ ] Branch on stable API `error.code` values and show generic user-facing error copy
 - SHOULD [ ] Add a debug-only mode for traces and retrieval metadata
 - NICE [ ] Keep UI implementation decoupled enough to support future SaaS onboarding and account flows
 
@@ -314,6 +317,8 @@ Notes:
 - Frontend migration details live in `FRONTEND_MIGRATION_PLAN.md`.
 - Do not rebuild the frontend from scratch. The goal is an API contract migration, not a UX rewrite.
 - Public UI should show friendly work states, not internal graph node names or retrieval planner details.
+- Local development can use `REQUIRE_AUTH=false`, but production/public integration should support the current browser auth contract.
+- Configure CORS/auth allowed origins for the actual frontend origin before public deployment.
 
 ---
 
@@ -379,8 +384,8 @@ Expected value:
 1. Project relevance scoring/ranking
 2. Structured answer modes for concise vs detailed responses
 3. Performance baseline against current public behavior
-4. Public production hardening: auth, rate limits, CORS, streaming abuse protection
-5. Frontend integration against the LangGraph backend
+4. Frontend integration against the LangGraph backend
+5. Production deployment smoke testing with auth, rate limits, CORS, and streaming abuse protection enabled
 6. Larger-doc RAG only when needed
 
 ---
@@ -388,7 +393,7 @@ Expected value:
 ## Success Criteria
 
 - MUST [x] End-to-end minimal graph works
-- MUST [ ] Multi-source answers work
+- MUST [x] Multi-source answers work
 - MUST [x] Follow-ups work with real session memory
-- SHOULD [ ] Streaming works
-- NICE [ ] Observability + reliability layers added
+- SHOULD [x] Streaming works
+- NICE [x] Observability + reliability layers added for current local/public-backend scope
