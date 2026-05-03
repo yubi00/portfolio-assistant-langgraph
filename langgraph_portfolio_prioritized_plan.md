@@ -135,13 +135,14 @@ Status: partially complete. Phase 1 grounding exists; retrieval-grounded answer 
 - MUST [x] History trimming
 - MUST [x] Wire stored history into graph invocation before `resolve_context`
 - SHOULD [x] Context-aware responses from provided session history
+- SHOULD [x] Skip context-resolution LLM calls for clearly standalone questions inside an active session
 - SHOULD [x] API `session_id` support for stored session history
 - SHOULD [x] Start with a simple app-level session store before introducing heavier memory infrastructure
 - SHOULD [x] LangGraph checkpointer evaluation for persisted thread memory
 - SHOULD [x] Decide when to adopt LangGraph checkpointers after the session contract is stable
 - NICE [ ] Advanced memory strategies
 
-Status: complete for current scope. The graph now owns `save_memory`, the API supports `session_id`, and the app persists bounded session history in-process. LangGraph checkpointers were evaluated and intentionally deferred for this project stage.
+Status: complete for current scope. The graph now owns `save_memory`, the API supports `session_id`, standalone queries skip unnecessary context-resolution LLM calls, and the app persists bounded session history in-process. LangGraph checkpointers were evaluated and intentionally deferred for this project stage.
 
 Current implemented contract:
 - request: optional `session_id`
@@ -194,9 +195,10 @@ Status: partially complete. The current streaming cut adds an SSE route with `se
 - SHOULD [x] Node-level tracing
 - SHOULD [x] Optional structured JSON logging
 - SHOULD [x] Log LLM token usage per node and aggregate total for each graph run
+- SHOULD [x] Reduce suggestion-generation input tokens by deriving prompts from the grounded answer instead of resending full retrieved context
 - NICE [ ] LangSmith integration
 
-Status: partially complete. Local logging exists with request/session-aware API and graph correlation, JSON logging is available as an opt-in mode, and LLM-backed graph nodes log token usage when provider metadata is available. External tracing remains future work.
+Status: partially complete. Local logging exists with request/session-aware API and graph correlation, JSON logging is available as an opt-in mode, LLM-backed graph nodes log token usage when provider metadata is available, and suggestion generation avoids a second full-context pass. External tracing remains future work.
 
 ---
 
@@ -328,7 +330,7 @@ Notes:
 
 ## Smartness Roadmap
 
-This section tracks capability upgrades that make the assistant materially smarter without adding unnecessary orchestration complexity.
+This section tracks capability upgrades that make the agentic assistant materially smarter without adding unnecessary orchestration complexity.
 
 Guiding principle:
 - prefer better retrieval quality and evidence selection before adding heavier agent loops or memory systems
@@ -339,6 +341,7 @@ Guiding principle:
 - SHOULD [x] Enrich `projects` retrieval with README content
 - SHOULD [x] Add featured project detail
 - SHOULD [x] Add in-memory TTL caching for GitHub repository and README retrieval
+- SHOULD [x] Add deterministic fuzzy repo-name matching for clear project-name typos
 - SHOULD [ ] Add relevance scoring/ranking so project answers prefer the best-matching projects instead of mostly recent repositories
 - SHOULD [x] Add resume section-aware chunking in the resume embeddings/vector phase
 - SHOULD [x] Add clarification behavior for ambiguous follow-up questions instead of guessing

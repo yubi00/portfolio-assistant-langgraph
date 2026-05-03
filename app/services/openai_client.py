@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from contextvars import ContextVar
+import re
 from typing import Any
 
 from langchain_openai import ChatOpenAI
@@ -39,6 +40,8 @@ class OpenAIAssistantClient:
 
     async def resolve_context(self, query: str, history: list[ConversationTurnState]) -> str:
         if not history:
+            return query
+        if not _needs_context_resolution(query):
             return query
 
         recent_history = history[-self._settings.context_history_window :]
@@ -226,3 +229,20 @@ def _extract_usage_metadata(response: Any) -> dict[str, int] | None:
         "output_tokens": int(usage.get("output_tokens", 0)),
         "total_tokens": int(usage.get("total_tokens", 0)),
     }
+
+
+CONTEXT_DEPENDENT_QUERY_PATTERNS = (
+    re.compile(r"\b(it|its|this|that|these|those|they|them|he|his|she|her)\b", re.IGNORECASE),
+    re.compile(r"\b(first|second|third|fourth|fifth|last)\s+(one|project|role|job|repo)\b", re.IGNORECASE),
+    re.compile(r"\b(previous|earlier|above)\b", re.IGNORECASE),
+    re.compile(r"\b(mentioned above|you mentioned|same project|same role)\b", re.IGNORECASE),
+    re.compile(r"^\s*(tell me more|more details|dig in|go deeper|elaborate|expand on)\b", re.IGNORECASE),
+    re.compile(r"^\s*(what about|how about|and what about)\b", re.IGNORECASE),
+)
+
+
+def _needs_context_resolution(query: str) -> bool:
+    normalized = query.strip()
+    if not normalized:
+        return False
+    return any(pattern.search(normalized) for pattern in CONTEXT_DEPENDENT_QUERY_PATTERNS)

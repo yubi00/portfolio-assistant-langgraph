@@ -4,6 +4,7 @@ from time import monotonic
 from pathlib import Path
 from typing import Protocol
 import base64
+from difflib import SequenceMatcher
 import re
 
 import httpx
@@ -406,7 +407,7 @@ def _find_target_repository(query: str | None, repos: list[dict]) -> dict | None
             matches.append(repo)
 
     if not matches:
-        return None
+        return _find_fuzzy_target_repository(normalized_query, repos)
 
     matches.sort(key=lambda repo: len(repo.get("name", "")), reverse=True)
     if len(matches) == 1:
@@ -417,6 +418,52 @@ def _find_target_repository(query: str | None, repos: list[dict]) -> dict | None
     if longest > second_longest:
         return matches[0]
     return None
+
+
+def _find_fuzzy_target_repository(normalized_query: str, repos: list[dict]) -> dict | None:
+    query_tokens = normalized_query.split()
+    if not query_tokens:
+        return None
+
+    scored_matches: list[tuple[float, dict]] = []
+    for repo in repos:
+        name = repo.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        normalized_name = _normalize_repo_match_text(name)
+        score = _best_repo_name_similarity(normalized_name, query_tokens)
+        if score >= 0.85:
+            scored_matches.append((score, repo))
+
+    if not scored_matches:
+        return None
+
+    scored_matches.sort(key=lambda item: item[0], reverse=True)
+    best_score, best_repo = scored_matches[0]
+    if len(scored_matches) == 1:
+        return best_repo
+
+    second_score = scored_matches[1][0]
+    if best_score - second_score >= 0.08:
+        return best_repo
+    return None
+
+
+def _best_repo_name_similarity(normalized_name: str, query_tokens: list[str]) -> float:
+    name_tokens = normalized_name.split()
+    if not name_tokens:
+        return 0.0
+
+    token_count = len(name_tokens)
+    query_text = " ".join(query_tokens)
+    candidates = [query_text]
+    if len(query_tokens) >= token_count:
+        candidates.extend(
+            " ".join(query_tokens[index : index + token_count])
+            for index in range(0, len(query_tokens) - token_count + 1)
+        )
+
+    return max(SequenceMatcher(None, normalized_name, candidate).ratio() for candidate in candidates)
 
 
 SUBJECTIVE_PROJECT_QUERY_PATTERN = re.compile(

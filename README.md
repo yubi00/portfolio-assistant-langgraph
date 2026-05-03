@@ -1,6 +1,6 @@
 # LangGraph Portfolio Assistant
 
-LangGraph-powered implementation of a generic portfolio assistant.
+LangGraph-powered implementation of a generic, agentic portfolio assistant.
 
 This implementation's architecture and decision log live in `LANGGRAPH_ARCHITECTURE.md`.
 
@@ -24,18 +24,20 @@ This implementation's architecture and decision log live in `LANGGRAPH_ARCHITECT
 
 ## What Makes It Special
 
-This assistant is not just a single-prompt chatbot over a resume.
+This is an agentic assistant, not just a single-prompt chatbot over a resume.
+
+It is still intentionally bounded: it answers portfolio questions, retrieves evidence, handles follow-ups, and applies guard rails, but it does not act as a general autonomous agent that takes open-ended actions.
 
 What makes it different:
 
 - it uses an explicit LangGraph orchestration flow instead of burying behavior inside one prompt
-- it rewrites follow-up questions into standalone queries before planning retrieval
+- it rewrites context-dependent follow-up questions into standalone queries before planning retrieval
 - it chooses the smallest useful source set before answering instead of always dumping all context into the model
 - it focuses project retrieval on one named repository for deeper project-specific questions
 - it has a clarification guard rail for genuinely ambiguous follow-ups instead of guessing blindly
 - it returns grounded suggested follow-up prompts separately from the answer so frontends can render optional next-step chips
 - it supports both request/response and SSE streaming while reusing the same core graph runner
-- it keeps the architecture simple enough to extend without turning into an overengineered agent system
+- it keeps the architecture simple enough to extend without turning into an overengineered autonomous agent system
 
 ## Current Scope
 
@@ -72,6 +74,7 @@ Phase 3 adds first-pass retrieval:
 - README excerpts are fetched best-effort for each selected repository when available
 - GitHub repository metadata and README excerpts use an in-memory TTL cache controlled by `GITHUB_CACHE_TTL_SECONDS`
 - named project questions focus retrieval on the matching repository and use a larger README excerpt budget
+- clear project-name typos can still focus retrieval through deterministic fuzzy matching
 - `resume` from Neon pgvector when `NEON_DATABASE_URL_STRING` is configured
 - explicit `resume_path` local-file override for development and debugging
 - `docs` from local text/markdown files
@@ -350,4 +353,4 @@ The streaming implementation emits these SSE events:
 
 It reuses the existing prompt runner and session handling. The current version streams real `generate_answer` model output from the graph as it arrives, emits stable `progress` milestones for important graph steps, lightly buffers tiny token fragments into more natural text chunks, and then sends final response metadata when the run completes.
 
-The completed response payload includes `suggested_prompts`. These are generated as structured data after the main answer and can be ignored by clients that do not need follow-up suggestions.
+The completed response payload includes `suggested_prompts`. These are generated as structured data after the main answer and can be ignored by clients that do not need follow-up suggestions. Suggestion generation uses the grounded answer rather than resending the full retrieved context, which keeps the extra LLM call cheaper while preserving answer quality.

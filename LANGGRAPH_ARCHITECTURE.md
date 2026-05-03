@@ -1,6 +1,6 @@
 # LangGraph Portfolio Assistant Architecture
 
-This document tracks the architecture of this LangGraph portfolio assistant.
+This document tracks the architecture of this LangGraph-powered agentic portfolio assistant.
 
 The goal is to provide production-grade boundaries: clear orchestration, explicit state, transport separation, configurable portfolio subject, grounded answers, and testable route decisions.
 
@@ -82,7 +82,9 @@ The streaming route keeps this boundary intact: SSE framing stays in `app.api.pr
 
 ## Agent Harness Design
 
-This project is not relying on LangGraph as a magic agent layer. LangGraph provides the orchestration runtime, but the assistant behavior comes from the harness built around it.
+This project is best described as an agentic assistant: it has orchestration, retrieval tools, memory, policy checks, clarification behavior, and structured outputs, but it does not pursue open-ended goals or take autonomous external actions.
+
+It is not relying on LangGraph as a magic agent layer. LangGraph provides the orchestration runtime, but the assistant behavior comes from the harness built around it.
 
 The harness is the set of contracts, boundaries, deterministic checks, retrieval services, prompt contracts, and response-shaping rules that make the assistant reliable.
 
@@ -116,7 +118,7 @@ This harness splits those responsibilities into smaller units:
 - `generate_answer` answers only from the merged context.
 - `save_memory` stores the completed turn within a bounded session window.
 
-Decision: keep the assistant as a simple, explicit harness rather than a general autonomous agent.
+Decision: keep the system as a bounded agentic assistant with a simple, explicit harness rather than a general autonomous agent.
 
 Problem solved: portfolio Q&A needs reliable grounding, follow-up handling, public-safety boundaries, and traceability more than it needs open-ended tool use or recursive planning.
 
@@ -342,6 +344,7 @@ Project retrieval strategy:
 - Current: fetch GitHub repository metadata for `GITHUB_OWNER`, excluding forks unless `GITHUB_INCLUDE_FORKS=true`.
 - Broad project questions format the most recent `GITHUB_PROJECTS_LIMIT` repositories and fetch bounded README excerpts when available.
 - Named project questions, including context-resolved follow-ups, focus retrieval on the matching repository and fetch a larger README excerpt for deeper answers.
+- If exact and normalized repo-name matching fail, deterministic fuzzy matching can still focus retrieval when one repository is a clear typo correction, such as `mathcast` -> `matchcast`.
 - Subjective project preference questions, such as "most proud of", "favorite", "flagship", or "most impressive", prioritize curated featured project metadata when available.
 - GitHub repository lists and README excerpts are cached in-process for a short TTL to reduce latency and avoid repeated GitHub calls for common portfolio questions.
 - Later: optionally pull GitHub pinned repositories through GraphQL and add scoring.
@@ -349,7 +352,7 @@ Project retrieval strategy:
 Problem solved: "what projects has this person built?" should not treat forked repositories as owned work.
 Project-specific questions should not dump unrelated repositories into context when the user clearly asks about one repo.
 
-Trade-off: excluding forks may hide meaningful fork-based contributions. README fetches are best-effort, so repositories without a README still work but provide less detail. Named-repository matching depends on the repo name appearing in the rewritten query; future scoring or embeddings can improve fuzzy project matching. The GitHub cache is process-local and TTL-based, so it is simple and fast but not shared across multiple API instances.
+Trade-off: excluding forks may hide meaningful fork-based contributions. README fetches are best-effort, so repositories without a README still work but provide less detail. Fuzzy project matching deliberately requires one clear best match; ambiguous close matches fall back to broad retrieval instead of guessing. The GitHub cache is process-local and TTL-based, so it is simple and fast but not shared across multiple API instances.
 
 Resume strategy:
 
@@ -418,6 +421,8 @@ Runtime retrieval is used only when the planner selects the `resume` source and 
 
 This keeps the answer natural while giving API and frontend clients optional next-step prompts to render as chips or terminal suggestions.
 
+Suggestion generation uses the user query and grounded final answer, not the full retrieved context. The answer has already paid the grounding cost, so this avoids a second large context pass for a small optional UX feature.
+
 The node is intentionally conditional inside its implementation:
 
 - generate suggestions for project, profile, skills, experience, resume, and professional-fit style answers
@@ -426,7 +431,7 @@ The node is intentionally conditional inside its implementation:
 
 Problem solved: inline prompt-only suggestions were not reliable enough. A separate structured node gives the frontend a clean field and keeps suggestion generation isolated from answer wording.
 
-Trade-off: eligible answers add one extra LLM call. The deterministic skip rules avoid paying that cost for simple factual answers.
+Trade-off: eligible answers add one extra LLM call. The deterministic skip rules avoid paying that cost for simple factual answers. Because the node uses the final answer instead of full context, suggestions may be less exhaustive than a second retrieval-grounded pass, but they remain grounded in what the assistant actually said and are much cheaper.
 
 ### Storage Model
 
@@ -528,17 +533,17 @@ Trade-off: `TypedDict` does not validate data at runtime. We accept this for Pha
 
 ## Context Resolution
 
-`resolve_context` performs history-aware query contextualization. When prior conversation turns are present, it asks the LLM to rewrite the latest user message into a standalone portfolio question using a bounded recent-history window. If the latest message is already standalone, the prompt instructs the model to return it unchanged.
+`resolve_context` performs history-aware query contextualization. When prior conversation turns are present and the latest query looks context-dependent, it asks the LLM to rewrite the latest user message into a standalone portfolio question using a bounded recent-history window. If there is no history, or the latest query is already clearly standalone, it returns the query unchanged without spending an LLM call.
 
 This follows the same design used by conversational RAG systems: rewrite the user question before classification and retrieval, instead of passing ambiguous follow-ups like "this project" or "the second one" directly into retrieval planning.
 
-Decision: run contextualization whenever conversation history exists, instead of maintaining a hardcoded list of reference trigger phrases.
+Decision: run contextualization only for context-dependent query shapes such as pronouns, ordinal references, "mentioned above", "tell me more", and "what about" style follow-ups.
 
 Problem solved: follow-up handling is not limited to phrases we anticipated in code.
 
 The default history window is 4 turns. This is wide enough for references like "the second project mentioned above" after a short side discussion, while still bounding prompt size.
 
-Trade-off: every follow-up with history incurs one extra LLM call, and a wider history window sends more tokens. If latency or cost becomes an issue, this can be optimized with a cheaper model, caching, or a combined context-resolution/classification step.
+Trade-off: this saves tokens and latency for standalone questions inside an active session, but a rare implicit follow-up without recognizable context-dependent wording may skip rewriting. The ambiguity guard still catches risky unresolved references later in the graph.
 
 ---
 

@@ -48,7 +48,6 @@ def build_suggestion_messages(
     answer: str,
     intent: str | None,
 ) -> list[tuple[str, str]]:
-    context = portfolio_context.strip() or NO_PORTFOLIO_CONTEXT
     intent_text = intent or "unknown"
     return [
         ("system", load_system_prompt("suggestion_generation.md")),
@@ -57,7 +56,6 @@ def build_suggestion_messages(
             (
                 f"Portfolio subject: {assistant_subject}\n"
                 f"Intent: {intent_text}\n\n"
-                f"Portfolio context:\n{context}\n\n"
                 f"User query: {query}\n\n"
                 f"Assistant answer:\n{answer}"
             ),

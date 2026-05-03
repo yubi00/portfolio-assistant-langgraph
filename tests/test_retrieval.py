@@ -264,6 +264,50 @@ async def test_project_retrieval_prefers_longest_repository_name(tmp_path, monke
     assert "- project-with-readme\n" not in result.content
 
 
+async def test_project_retrieval_focuses_on_clear_typo_match(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(retrieval_module.httpx, "AsyncClient", lambda timeout: FakeMatchCastGitHubClient())
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            GITHUB_OWNER="alex",
+            GITHUB_TARGET_README_MAX_CHARS=200,
+        )
+    )
+
+    result = await service.retrieve_projects("Tell me about mathcast project")
+
+    assert result.source == RetrievalSource.PROJECTS
+    assert result.error is None
+    assert result.content.startswith("Focused GitHub project:")
+    assert "- matchcast" in result.content
+    assert "AI-powered match analysis" in result.content
+    assert "- portfolio-assistant-langgraph" not in result.content
+
+
+async def test_project_retrieval_avoids_fuzzy_focus_when_match_is_not_clear(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(retrieval_module.httpx, "AsyncClient", lambda timeout: AmbiguousFuzzyGitHubClient())
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            GITHUB_OWNER="alex",
+        )
+    )
+
+    result = await service.retrieve_projects("Tell me about matcast project")
+
+    assert result.source == RetrievalSource.PROJECTS
+    assert result.error is None
+    assert result.content.startswith("GitHub projects:")
+    assert "- matchcast" in result.content
+    assert "- mathcast" in result.content
+
+
 async def test_project_retrieval_prioritizes_featured_metadata_for_subjective_questions(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     metadata_path = tmp_path / "featured_projects.json"
@@ -411,6 +455,81 @@ class FakeGitHubClient:
                 b"# Project API\n\nThis project exposes a focused API for portfolio questions."
             ).decode("utf-8")
             return FakeResponse({"content": encoded}, status_code=self._readme_status)
+        return FakeResponse({}, status_code=404)
+
+
+class FakeMatchCastGitHubClient:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return None
+
+    async def get(self, url, headers=None, params=None):
+        if url.endswith("/users/alex/repos"):
+            return FakeResponse(
+                [
+                    {
+                        "name": "portfolio-assistant-langgraph",
+                        "description": "LangGraph portfolio assistant.",
+                        "language": "Python",
+                        "stargazers_count": 3,
+                        "html_url": "https://github.com/alex/portfolio-assistant-langgraph",
+                        "topics": ["ai"],
+                        "archived": False,
+                        "fork": False,
+                    },
+                    {
+                        "name": "matchcast",
+                        "description": "AI-powered match analysis.",
+                        "language": "TypeScript",
+                        "stargazers_count": 2,
+                        "html_url": "https://github.com/alex/matchcast",
+                        "topics": ["ai", "football"],
+                        "archived": False,
+                        "fork": False,
+                    },
+                ]
+            )
+        if url.endswith("/repos/alex/matchcast/readme"):
+            encoded = base64.b64encode(b"# MatchCast\n\nAI-powered match analysis.").decode("utf-8")
+            return FakeResponse({"content": encoded})
+        return FakeResponse({}, status_code=404)
+
+
+class AmbiguousFuzzyGitHubClient:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return None
+
+    async def get(self, url, headers=None, params=None):
+        if url.endswith("/users/alex/repos"):
+            return FakeResponse(
+                [
+                    {
+                        "name": "matchcast",
+                        "description": "AI-powered match analysis.",
+                        "language": "TypeScript",
+                        "stargazers_count": 2,
+                        "html_url": "https://github.com/alex/matchcast",
+                        "topics": ["ai"],
+                        "archived": False,
+                        "fork": False,
+                    },
+                    {
+                        "name": "mathcast",
+                        "description": "Math content project.",
+                        "language": "TypeScript",
+                        "stargazers_count": 1,
+                        "html_url": "https://github.com/alex/mathcast",
+                        "topics": ["math"],
+                        "archived": False,
+                        "fork": False,
+                    },
+                ]
+            )
         return FakeResponse({}, status_code=404)
 
 
