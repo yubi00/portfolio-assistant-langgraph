@@ -257,7 +257,7 @@ Notes:
 - MUST [x] Add public auth gate suitable for a portfolio site
 - MUST [x] Add browser-friendly auth flow before enabling auth in production
 - MUST [x] Add secure CORS/origin policy for public deployment
-- MUST [ ] Hide development-only docs/routes in production where appropriate
+- MUST [x] Hide development-only docs/routes in production where appropriate
 - MUST [x] Ensure client-visible errors do not leak internal service details
 - SHOULD [x] Add request abuse logging and rate-limit hit logging
 - SHOULD [x] Add security-focused tests around auth, rate limits, and streaming errors
@@ -273,6 +273,7 @@ Notes:
 - HTTP API errors now use a stable `{error: {status, code, message}}` shape so clients can branch on error codes.
 - FastAPI validation and framework HTTP errors are normalized globally; validation details expose only `field` and `message`, never raw input.
 - API-facing errors now extend a common `AppError` base class so status codes, machine-readable error codes, and safe messages are owned by typed errors instead of duplicated in route handlers.
+- `APP_ENV=production` disables `/docs`, `/redoc`, and `/openapi.json`; local development keeps them enabled by default.
 - Auth implementation target: provide a generic browser-safe contract for public clients.
   `POST /auth/session` verifies Cloudflare Turnstile and sets an HttpOnly refresh cookie.
   `POST /auth/token` reads that refresh cookie and returns a short-lived access token.

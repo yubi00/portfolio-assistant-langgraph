@@ -237,6 +237,7 @@ The app now applies basic reliability controls to OpenAI-backed graph steps:
 
 The API applies lightweight in-process abuse protection:
 
+- production mode hides development-only API docs when `APP_ENV=production`
 - `/prompt` rate limit via `PROMPT_RATE_LIMIT`
 - `/prompt/stream` rate limit via `PROMPT_STREAM_RATE_LIMIT`
 - `/auth/session` rate limit via `AUTH_SESSION_RATE_LIMIT`
@@ -246,6 +247,7 @@ The API applies lightweight in-process abuse protection:
 Defaults:
 
 ```powershell
+APP_ENV=development
 RATE_LIMIT_ENABLED=true
 PROMPT_RATE_LIMIT=30/minute
 PROMPT_STREAM_RATE_LIMIT=10/minute
@@ -253,6 +255,8 @@ AUTH_SESSION_RATE_LIMIT=3/minute
 AUTH_TOKEN_RATE_LIMIT=10/minute
 MAX_ACTIVE_STREAMS_PER_CLIENT=2
 ```
+
+Set `APP_ENV=production` in public deployments to disable `/docs`, `/redoc`, and `/openapi.json`.
 
 Rate limiting uses the maintained `limits` library with in-memory storage. This is appropriate for the current single-instance deployment path. If the API is deployed across multiple instances, move rate-limit state to shared storage such as Redis.
 

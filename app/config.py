@@ -9,6 +9,8 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    app_env: str = Field(default="development", validation_alias="APP_ENV")
+
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     openai_model_default: str = Field(default="gpt-4.1-mini", validation_alias="OPENAI_MODEL_DEFAULT")
     openai_temperature: float = Field(default=0.2, validation_alias="OPENAI_TEMPERATURE")

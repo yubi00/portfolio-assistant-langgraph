@@ -154,6 +154,26 @@ def test_unknown_route_returns_structured_http_error(monkeypatch):
     _assert_error(response, status=404, code="NOT_FOUND", message="Not Found")
 
 
+def test_api_docs_are_enabled_outside_production(monkeypatch):
+    monkeypatch.setattr(app_main, "require_settings", lambda: _build_test_settings(APP_ENV="development"))
+
+    client = TestClient(create_app())
+
+    assert client.get("/docs").status_code == 200
+    assert client.get("/redoc").status_code == 200
+    assert client.get("/openapi.json").status_code == 200
+
+
+def test_api_docs_are_hidden_in_production(monkeypatch):
+    monkeypatch.setattr(app_main, "require_settings", lambda: _build_test_settings(APP_ENV="production"))
+
+    client = TestClient(create_app())
+
+    _assert_error(client.get("/docs"), status=404, code="NOT_FOUND", message="Not Found")
+    _assert_error(client.get("/redoc"), status=404, code="NOT_FOUND", message="Not Found")
+    _assert_error(client.get("/openapi.json"), status=404, code="NOT_FOUND", message="Not Found")
+
+
 def test_prompt_stream_route_emits_sse_events(monkeypatch):
     async def fake_run_prompt_stream(request, settings, *, request_id=None):
         yield {"type": "progress", "data": {"node": "resolve_context", "step": "context_resolved"}}

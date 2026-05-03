@@ -153,6 +153,7 @@ The public API now has three lightweight abuse-protection layers before expensiv
 - optional browser auth for expensive prompt endpoints
 - request rate limiting for `/prompt`
 - request rate limiting plus active stream concurrency limiting for `/prompt/stream`
+- production-mode hiding for development-only API docs/routes
 
 Rate limiting uses the maintained `limits` library with `MemoryStorage` and a fixed-window strategy. The project does not hand-roll rate-limit counters or time-window math.
 
@@ -160,6 +161,7 @@ Configuration:
 
 | Setting | Default | Meaning |
 |---|---:|---|
+| `APP_ENV` | `development` | Set to `production` to hide `/docs`, `/redoc`, and `/openapi.json` |
 | `RATE_LIMIT_ENABLED` | `true` | Enables/disables request rate limits |
 | `PROMPT_RATE_LIMIT` | `30/minute` | Max `/prompt` requests per client |
 | `PROMPT_STREAM_RATE_LIMIT` | `10/minute` | Max `/prompt/stream` requests per client |
@@ -226,11 +228,11 @@ sequenceDiagram
 
 The refresh token is a longer-lived app-owned JWT stored in an HttpOnly cookie. The access token is a short-lived app-owned JWT returned to the frontend and kept in memory. Both tokens use `HS256` through the maintained `PyJWT` library and include token type, session id, issuer, audience, issued-at, expiry, and token id claims.
 
-Decision: use app-owned JWT grant/access tokens with Turnstile as the current human-verification bootstrap.
+Decision: use app-owned JWT refresh/access tokens with Turnstile as the current human-verification bootstrap.
 
 Problem solved: rate limiting alone does not stop scripted browser abuse or accidental public cost spikes. Turnstile protects token issuance, and short-lived access tokens protect expensive assistant endpoints.
 
-Trade-off: this is not user identity. It proves a browser session passed Turnstile. A future identity provider such as GitHub OAuth can replace or augment the bootstrap step while preserving the same backend-owned grant/access token model.
+Trade-off: this is not user identity. It proves a browser session passed Turnstile. A future identity provider such as GitHub OAuth can replace or augment the bootstrap step while preserving the same backend-owned refresh/access token model.
 
 Decision: use in-memory rate limiting for the first public-hardening cut.
 

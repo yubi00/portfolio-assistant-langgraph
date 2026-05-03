@@ -54,7 +54,13 @@ def create_app() -> FastAPI:
         return _create_configuration_error_app(
             "Invalid application configuration. Invalid rate limit setting. Update .env and restart the application."
         )
-    app = FastAPI(title=APP_TITLE, lifespan=lifespan)
+    app = FastAPI(
+        title=APP_TITLE,
+        lifespan=lifespan,
+        docs_url=None if _is_production(settings.app_env) else "/docs",
+        redoc_url=None if _is_production(settings.app_env) else "/redoc",
+        openapi_url=None if _is_production(settings.app_env) else "/openapi.json",
+    )
     app.state.session_store = InMemorySessionStore(
         max_history_turns=settings.session_history_max_turns,
         ttl_minutes=settings.session_ttl_minutes,
@@ -130,6 +136,10 @@ def _http_error_message(exc: HTTPException) -> str:
     if isinstance(detail, str) and detail:
         return detail
     return "HTTP error."
+
+
+def _is_production(app_env: str) -> bool:
+    return app_env.strip().lower() == "production"
 
 
 def _create_configuration_error_app(message: str) -> FastAPI:
