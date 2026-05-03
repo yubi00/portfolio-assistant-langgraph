@@ -1,14 +1,16 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.auth import router as auth_router
 from app.api.prompt import router as prompt_router
 from app.config import SettingsError, require_settings
-from app.errors import ConfigurationError, app_error_response
+from app.errors import ConfigurationError, app_error_response, error_response
 from app.graph.builder import get_portfolio_graph
 from app.logging_config import configure_logging
 from app.services.auth import allowed_origins
@@ -65,6 +67,7 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
     )
+    _register_exception_handlers(app)
     app.include_router(auth_router)
     app.include_router(prompt_router)
 
@@ -73,6 +76,60 @@ def create_app() -> FastAPI:
         return {"status": "ok", "service": APP_TITLE}
 
     return app
+
+
+def _register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content=error_response(
+                422,
+                "VALIDATION_ERROR",
+                "Request validation failed.",
+                details=_validation_error_details(exc),
+            ),
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
+        status_code = exc.status_code
+        return JSONResponse(
+            status_code=status_code,
+            content=error_response(status_code, _http_error_code(status_code), _http_error_message(exc)),
+            headers=getattr(exc, "headers", None),
+        )
+
+
+def _validation_error_details(exc: RequestValidationError) -> list[dict]:
+    details: list[dict] = []
+    for error in exc.errors():
+        location = [str(part) for part in error.get("loc", []) if part != "body"]
+        field = ".".join(location) if location else "body"
+        details.append(
+            {
+                "field": field,
+                "message": str(error.get("msg", "Invalid input.")),
+            }
+        )
+    return details
+
+
+def _http_error_code(status_code: int) -> str:
+    return {
+        401: "UNAUTHORIZED",
+        403: "FORBIDDEN",
+        404: "NOT_FOUND",
+        405: "METHOD_NOT_ALLOWED",
+        429: "RATE_LIMIT_EXCEEDED",
+    }.get(status_code, "HTTP_ERROR")
+
+
+def _http_error_message(exc: HTTPException) -> str:
+    detail = exc.detail
+    if isinstance(detail, str) and detail:
+        return detail
+    return "HTTP error."
 
 
 def _create_configuration_error_app(message: str) -> FastAPI:

@@ -143,6 +143,17 @@ def test_create_app_returns_configuration_error_app_for_invalid_rate_limit(monke
     assert "Invalid rate limit setting" in response.json()["error"]["message"]
 
 
+def test_unknown_route_returns_structured_http_error(monkeypatch):
+    monkeypatch.setattr(app_main, "require_settings", _test_settings)
+
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = _test_settings
+
+    response = client.get("/missing-route")
+
+    _assert_error(response, status=404, code="NOT_FOUND", message="Not Found")
+
+
 def test_prompt_stream_route_emits_sse_events(monkeypatch):
     async def fake_run_prompt_stream(request, settings, *, request_id=None):
         yield {"type": "progress", "data": {"node": "resolve_context", "step": "context_resolved"}}

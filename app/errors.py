@@ -98,14 +98,17 @@ class UpstreamServiceError(AppError):
     default_message = "Upstream service error."
 
 
-def error_response(status: int, code: str, message: str) -> dict:
-    return {
+def error_response(status: int, code: str, message: str, details: list[dict] | None = None) -> dict:
+    payload = {
         "error": {
             "status": status,
             "code": code,
             "message": message,
         }
     }
+    if details is not None:
+        payload["error"]["details"] = details
+    return payload
 
 
 def app_error_response(error: AppError) -> dict:

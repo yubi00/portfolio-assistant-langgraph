@@ -61,6 +61,38 @@ def test_auth_token_requires_refresh_cookie(monkeypatch):
     _assert_error(response, status=401, code="AUTH_REQUIRED")
 
 
+def test_auth_session_returns_structured_validation_error_for_missing_body(monkeypatch):
+    settings = _build_test_settings()
+    client = _client(monkeypatch, settings)
+
+    response = client.post("/auth/session")
+
+    _assert_error(response, status=422, code="VALIDATION_ERROR")
+    assert response.json()["error"]["details"] == [
+        {
+            "field": "body",
+            "message": "Field required",
+        }
+    ]
+    assert "input" not in response.text
+
+
+def test_auth_session_returns_structured_validation_error_for_missing_field(monkeypatch):
+    settings = _build_test_settings()
+    client = _client(monkeypatch, settings)
+
+    response = client.post("/auth/session", json={})
+
+    _assert_error(response, status=422, code="VALIDATION_ERROR")
+    assert response.json()["error"]["details"] == [
+        {
+            "field": "turnstile_token",
+            "message": "Field required",
+        }
+    ]
+    assert "input" not in response.text
+
+
 def test_auth_session_rejects_short_signing_secret(monkeypatch):
     settings = _build_test_settings(AUTH_SIGNING_SECRET="too-short")
     client = _client(monkeypatch, settings)

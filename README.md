@@ -268,6 +268,26 @@ HTTP API errors use a stable structured shape:
 }
 ```
 
+Validation errors use the same envelope with safe field-level details:
+
+```json
+{
+  "error": {
+    "status": 422,
+    "code": "VALIDATION_ERROR",
+    "message": "Request validation failed.",
+    "details": [
+      {
+        "field": "turnstile_token",
+        "message": "Field required"
+      }
+    ]
+  }
+}
+```
+
+Validation responses intentionally omit raw input values.
+
 Internally, API-facing failures extend a common `AppError` base class with `status_code`, `code`, and `message`. This keeps route handlers from inventing one-off response shapes as new errors are added.
 
 Frontend clients should branch on `error.code`, not raw message text.

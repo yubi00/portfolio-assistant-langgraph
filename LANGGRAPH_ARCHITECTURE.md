@@ -181,11 +181,14 @@ HTTP errors use a structured response contract:
 
 API-facing errors are represented internally with a common `AppError` base class. Each concrete error owns its HTTP status, stable machine-readable code, and safe client message. Route handlers convert `AppError` instances into the response contract above, instead of duplicating error-shape logic per endpoint.
 
+FastAPI request validation errors and framework HTTP exceptions are also normalized globally. Validation responses include only safe field-level details (`field`, `message`) and intentionally omit raw input values.
+
 Current HTTP error codes include:
 
 | Code | Meaning |
 |---|---|
 | `CONFIGURATION_ERROR` | Application configuration is invalid |
+| `VALIDATION_ERROR` | Request body, path, query, or header validation failed |
 | `BAD_REQUEST` | Request validation or prompt input failed |
 | `SESSION_NOT_FOUND` | Supplied `session_id` does not exist or expired |
 | `UPSTREAM_SERVICE_ERROR` | Upstream AI service failed |

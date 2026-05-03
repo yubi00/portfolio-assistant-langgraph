@@ -271,6 +271,7 @@ Notes:
 - `/prompt` and `/prompt/stream` now use the maintained `limits` library for configurable in-process request rate limiting.
 - `/prompt/stream` also has an active-stream concurrency guard to protect long-running SSE responses.
 - HTTP API errors now use a stable `{error: {status, code, message}}` shape so clients can branch on error codes.
+- FastAPI validation and framework HTTP errors are normalized globally; validation details expose only `field` and `message`, never raw input.
 - API-facing errors now extend a common `AppError` base class so status codes, machine-readable error codes, and safe messages are owned by typed errors instead of duplicated in route handlers.
 - Auth implementation target: provide a generic browser-safe contract for public clients.
   `POST /auth/session` verifies Cloudflare Turnstile and sets an HttpOnly refresh cookie.
