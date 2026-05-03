@@ -13,6 +13,7 @@ class NodeName(StrEnum):
     RETRIEVE_DOCS = "retrieve_docs"
     MERGE_NORMALIZE_CONTEXT = "merge_normalize_context"
     GENERATE_ANSWER = "generate_answer"
+    GENERATE_SUGGESTIONS = "generate_suggestions"
     CLARIFICATION_RESPONSE = "clarification_response"
     FRIENDLY_RESPONSE = "friendly_response"
     SAVE_MEMORY = "save_memory"

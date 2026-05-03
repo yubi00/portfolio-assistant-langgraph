@@ -110,6 +110,7 @@ def build_prompt_response(request: PromptRequest, result: dict, answer_override:
         retrieval_errors=result.get("retrieval_errors", []),
         rewritten_query=result.get("rewritten_query", request.prompt),
         node_trace=result.get("node_trace", []),
+        suggested_prompts=result.get("suggested_prompts", []),
     )
 
 
@@ -134,6 +135,7 @@ PROGRESS_STEP_BY_NODE = {
     NodeName.RETRIEVE_DOCS.value: "docs_retrieved",
     NodeName.MERGE_NORMALIZE_CONTEXT.value: "context_merged",
     NodeName.GENERATE_ANSWER.value: "answer_started",
+    NodeName.GENERATE_SUGGESTIONS.value: "suggestions_generated",
     NodeName.CLARIFICATION_RESPONSE.value: "answer_started",
     NodeName.FRIENDLY_RESPONSE.value: "answer_started",
     NodeName.SAVE_MEMORY.value: "memory_saved",

@@ -47,6 +47,7 @@ def test_main_runs_one_shot_prompt(monkeypatch, capsys):
             retrieval_errors=[],
             rewritten_query=prompt,
             node_trace=["ingest_user_message", "generate_answer"],
+            suggested_prompts=["How does the architecture work?"],
         )
         cli._print_response(response, show_trace)
         return response
@@ -62,6 +63,8 @@ def test_main_runs_one_shot_prompt(monkeypatch, capsys):
     assert "rewritten_query: What projects?" in output
     assert "sources: projects" in output
     assert "source_reason: Project questions need project data." in output
+    assert "Suggested next questions:" in output
+    assert "- How does the architecture work?" in output
     assert "trace: ingest_user_message -> generate_answer" in output
 
 

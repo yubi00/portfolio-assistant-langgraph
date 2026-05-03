@@ -169,6 +169,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _print_response(response: PromptResponse, show_trace: bool) -> None:
     print(response.answer)
+    if response.suggested_prompts:
+        print("\nSuggested next questions:")
+        for prompt in response.suggested_prompts:
+            print(f"- {prompt}")
     if show_trace:
         if response.rewritten_query:
             print(f"\nrewritten_query: {response.rewritten_query}")

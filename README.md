@@ -13,6 +13,7 @@ This implementation's architecture and decision log live in `LANGGRAPH_ARCHITECT
 - explicit retrieval planning before answer generation
 - targeted GitHub project deep dives when a query names a specific repository
 - multi-source context merge with bounded context size
+- structured suggested follow-up prompts for richer portfolio conversations
 - API session memory via `session_id`
 - CLI and FastAPI transports backed by the same graph runner
 - SSE streaming via `POST /prompt/stream`
@@ -32,6 +33,7 @@ What makes it different:
 - it chooses the smallest useful source set before answering instead of always dumping all context into the model
 - it focuses project retrieval on one named repository for deeper project-specific questions
 - it has a clarification guard rail for genuinely ambiguous follow-ups instead of guessing blindly
+- it returns grounded suggested follow-up prompts separately from the answer so frontends can render optional next-step chips
 - it supports both request/response and SSE streaming while reusing the same core graph runner
 - it keeps the architecture simple enough to extend without turning into an overengineered agent system
 
@@ -40,7 +42,7 @@ What makes it different:
 - FastAPI application
 - `uv` project setup
 - LangGraph `StateGraph`
-- Nodes for ingest, context resolution, policy guard, relevance classification, ambiguity checking, retrieval planning, retrieval, context merge, answer generation, clarification response, and friendly off-topic responses
+- Nodes for ingest, context resolution, policy guard, relevance classification, ambiguity checking, retrieval planning, retrieval, context merge, answer generation, suggestion generation, clarification response, and friendly off-topic responses
 - Conditional routing for portfolio and off-topic prompts
 - Real OpenAI calls through `langchain-openai`
 - File-backed system prompts under `app/prompts/`
@@ -342,3 +344,5 @@ The streaming implementation emits these SSE events:
 - `error`
 
 It reuses the existing prompt runner and session handling. The current version streams real `generate_answer` model output from the graph as it arrives, emits stable `progress` milestones for important graph steps, lightly buffers tiny token fragments into more natural text chunks, and then sends final response metadata when the run completes.
+
+The completed response payload includes `suggested_prompts`. These are generated as structured data after the main answer and can be ignored by clients that do not need follow-up suggestions.

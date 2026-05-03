@@ -266,7 +266,8 @@ flowchart TD
     Resume --> Merge
     Docs --> Merge
     Merge --> Answer[generate_answer]
-    Answer --> Save[save_memory]
+    Answer --> Suggestions[generate_suggestions]
+    Suggestions --> Save[save_memory]
     Clarify --> Save
     Friendly --> Save
     Save --> END([END])
@@ -409,6 +410,22 @@ flowchart TD
 
 Runtime retrieval is used only when the planner selects the `resume` source and no explicit `resume_path` override is supplied.
 
+### Suggested Follow-Ups
+
+`generate_suggestions` runs after `generate_answer` for normal portfolio answers. It produces structured `suggested_prompts` instead of appending follow-up text to the answer.
+
+This keeps the answer natural while giving API and frontend clients optional next-step prompts to render as chips or terminal suggestions.
+
+The node is intentionally conditional inside its implementation:
+
+- generate suggestions for project, profile, skills, experience, resume, and professional-fit style answers
+- skip suggestions for education, contact, policy/off-topic, clarification, or empty-answer cases
+- cap suggestions to 3 short grounded prompts
+
+Problem solved: inline prompt-only suggestions were not reliable enough. A separate structured node gives the frontend a clean field and keeps suggestion generation isolated from answer wording.
+
+Trade-off: eligible answers add one extra LLM call. The deterministic skip rules avoid paying that cost for simple factual answers.
+
 ### Storage Model
 
 ```mermaid
@@ -495,6 +512,7 @@ Current keys:
 - `merged_context`: normalized context passed to answer generation
 - `retrieval_errors`: non-fatal retrieval errors collected from source nodes
 - `final_answer`: final response text
+- `suggested_prompts`: optional grounded follow-up prompts generated after the answer
 - `error`: reserved for later reliability handling
 - `node_trace`: append-only execution trace used for CLI/API debugging
 
@@ -869,7 +887,7 @@ uv run portfolio-assistant "who are you" --show-trace
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> classify_relevance -> check_ambiguity -> plan_retrieval -> retrieve_resume -> merge_normalize_context -> generate_answer -> save_memory
+ingest_user_message -> resolve_context -> policy_guard -> classify_relevance -> check_ambiguity -> plan_retrieval -> retrieve_resume -> merge_normalize_context -> generate_answer -> generate_suggestions -> save_memory
 ```
 
 User-task redirect:
@@ -881,7 +899,7 @@ uv run portfolio-assistant "can you help me fix bug in one of my typescript proj
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> classify_relevance -> friendly_response -> save_memory
+ingest_user_message -> resolve_context -> policy_guard -> classify_relevance -> friendly_response -> save_memory
 ```
 
 Portfolio-fit answer:
@@ -893,7 +911,7 @@ uv run portfolio-assistant "can Yubi help with TypeScript backend systems?" --su
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> classify_relevance -> check_ambiguity -> plan_retrieval -> retrieve_projects -> retrieve_resume -> merge_normalize_context -> generate_answer -> save_memory
+ingest_user_message -> resolve_context -> policy_guard -> classify_relevance -> check_ambiguity -> plan_retrieval -> retrieve_projects -> retrieve_resume -> merge_normalize_context -> generate_answer -> generate_suggestions -> save_memory
 ```
 
 ---

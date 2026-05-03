@@ -1,3 +1,4 @@
+import logging
 import re
 
 from app.config import Settings
@@ -6,6 +7,9 @@ from app.graph.observability import log_node, skipped_update
 from app.graph.state import PortfolioState
 from app.services.assistant import AssistantService
 from app.services.retrieval import PortfolioRetrievalService, RetrievalResult
+
+
+logger = logging.getLogger("app.graph.nodes")
 
 
 class PortfolioGraphNodes:
@@ -176,6 +180,33 @@ class PortfolioGraphNodes:
             "node_trace": [NodeName.GENERATE_ANSWER],
         }
 
+    @log_node(NodeName.GENERATE_SUGGESTIONS)
+    async def generate_suggestions(self, state: PortfolioState) -> dict:
+        if not _should_generate_suggestions(state):
+            return {
+                "suggested_prompts": [],
+                "node_trace": [NodeName.GENERATE_SUGGESTIONS],
+            }
+
+        try:
+            suggestions = await self._assistant_service.generate_suggestions(
+                query=state["rewritten_query"],
+                assistant_subject=state.get("assistant_subject", "the portfolio owner"),
+                portfolio_context=state.get("merged_context") or state.get("portfolio_context", ""),
+                answer=state.get("final_answer", ""),
+                intent=state.get("intent"),
+            )
+        except Exception:
+            logger.warning("suggestion generation failed; continuing without suggestions", exc_info=True)
+            return {
+                "suggested_prompts": [],
+                "node_trace": [NodeName.GENERATE_SUGGESTIONS],
+            }
+        return {
+            "suggested_prompts": suggestions.prompts,
+            "node_trace": [NodeName.GENERATE_SUGGESTIONS],
+        }
+
     @log_node(NodeName.CLARIFICATION_RESPONSE)
     async def clarification_response(self, state: PortfolioState) -> dict:
         return {
@@ -221,6 +252,44 @@ def _result_update(result: RetrievalResult, context_key: str, node_name: NodeNam
     if result.error:
         update["retrieval_errors"] = [result.error]
     return update
+
+
+SUGGESTION_INTENTS = {
+    "projects",
+    "project",
+    "skills",
+    "experience",
+    "resume",
+    "profile",
+    "professional_fit",
+    "work_experience",
+}
+
+NO_SUGGESTION_INTENTS = {
+    "education",
+    "contact",
+    "policy_violation",
+    "user_task",
+    "off_topic",
+}
+
+
+def _should_generate_suggestions(state: PortfolioState) -> bool:
+    if state.get("route") != "portfolio_query":
+        return False
+    if state.get("needs_clarification"):
+        return False
+    if not state.get("final_answer", "").strip():
+        return False
+
+    intent = (state.get("intent") or "").lower()
+    if intent in NO_SUGGESTION_INTENTS:
+        return False
+    if intent in SUGGESTION_INTENTS:
+        return True
+
+    sources = set(state.get("retrieval_sources", []))
+    return "projects" in sources or len(sources) > 1
 
 
 POLICY_VIOLATION_PATTERNS = (

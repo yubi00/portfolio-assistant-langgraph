@@ -41,6 +41,30 @@ def build_answer_messages(query: str, assistant_subject: str, portfolio_context:
     ]
 
 
+def build_suggestion_messages(
+    query: str,
+    assistant_subject: str,
+    portfolio_context: str,
+    answer: str,
+    intent: str | None,
+) -> list[tuple[str, str]]:
+    context = portfolio_context.strip() or NO_PORTFOLIO_CONTEXT
+    intent_text = intent or "unknown"
+    return [
+        ("system", load_system_prompt("suggestion_generation.md")),
+        (
+            "human",
+            (
+                f"Portfolio subject: {assistant_subject}\n"
+                f"Intent: {intent_text}\n\n"
+                f"Portfolio context:\n{context}\n\n"
+                f"User query: {query}\n\n"
+                f"Assistant answer:\n{answer}"
+            ),
+        ),
+    ]
+
+
 def build_retrieval_planning_messages(query: str, assistant_subject: str, intent: str | None) -> list[tuple[str, str]]:
     intent_text = intent or "unknown"
     return [

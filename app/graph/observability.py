@@ -27,9 +27,10 @@ NODE_LABELS = {
     NodeName.RETRIEVE_DOCS: "07 retrieve:docs",
     NodeName.MERGE_NORMALIZE_CONTEXT: "08 merge",
     NodeName.GENERATE_ANSWER: "09 answer",
+    NodeName.GENERATE_SUGGESTIONS: "10 suggestions",
     NodeName.CLARIFICATION_RESPONSE: "09 clarify",
     NodeName.FRIENDLY_RESPONSE: "09 redirect",
-    NodeName.SAVE_MEMORY: "10 memory",
+    NodeName.SAVE_MEMORY: "11 memory",
 }
 
 RETRIEVAL_NODE_SOURCES = {

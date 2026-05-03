@@ -1,7 +1,7 @@
 from app.config import Settings
 from app.graph.builder import build_portfolio_graph
 from app.graph.constants import RetrievalSource, RouteName
-from app.services.assistant import RelevanceDecision, RetrievalPlan
+from app.services.assistant import RelevanceDecision, RetrievalPlan, SuggestedPrompts
 from app.services.retrieval import RetrievalResult
 import logging
 
@@ -40,6 +40,11 @@ class FakeAssistantService:
     async def generate_answer(self, query, assistant_subject, portfolio_context):
         return f"Grounded answer for {assistant_subject}: {query}"
 
+    async def generate_suggestions(self, query, assistant_subject, portfolio_context, answer, intent=None):
+        if intent in {"projects", "profile"}:
+            return SuggestedPrompts(prompts=[f"Ask about {assistant_subject}'s architecture"])
+        return SuggestedPrompts(prompts=[])
+
     async def plan_retrieval(self, query, assistant_subject, intent=None):
         normalized_query = query.lower()
         if "who are you" in normalized_query:
@@ -76,6 +81,11 @@ class FakeRetrievalService:
         return RetrievalResult(source=RetrievalSource.DOCS, content="Docs data")
 
 
+class FailingSuggestionAssistantService(FakeAssistantService):
+    async def generate_suggestions(self, query, assistant_subject, portfolio_context, answer, intent=None):
+        raise RuntimeError("suggestion failure")
+
+
 async def test_relevant_query_routes_to_generate_answer():
     graph = build_portfolio_graph(FakeAssistantService(), FakeRetrievalService(), settings=_test_settings())
 
@@ -96,6 +106,7 @@ async def test_relevant_query_routes_to_generate_answer():
     assert result["merged_context"] == "[projects]\nProject data"
     assert result["rewritten_query"] == "Tell me about the first project"
     assert result["final_answer"] == "Grounded answer for Alex: Tell me about the first project"
+    assert result["suggested_prompts"] == ["Ask about Alex's architecture"]
     assert result["messages"] == [
         {"user": "List projects", "assistant": "1. Example project"},
         {"user": "Tell me about the first one", "assistant": "Grounded answer for Alex: Tell me about the first project"},
@@ -110,8 +121,29 @@ async def test_relevant_query_routes_to_generate_answer():
         "retrieve_projects",
         "merge_normalize_context",
         "generate_answer",
+        "generate_suggestions",
         "save_memory",
     ]
+
+
+async def test_suggestion_failure_does_not_fail_answer():
+    graph = build_portfolio_graph(
+        FailingSuggestionAssistantService(),
+        FakeRetrievalService(),
+        settings=_test_settings(),
+    )
+
+    result = await graph.ainvoke(
+        {
+            "user_query": "Tell me about the first one",
+            "messages": [{"user": "List projects", "assistant": "1. Example project"}],
+            "assistant_subject": "Alex",
+        }
+    )
+
+    assert result["final_answer"] == "Grounded answer for Alex: Tell me about the first project"
+    assert result["suggested_prompts"] == []
+    assert result["node_trace"][-2:] == ["generate_suggestions", "save_memory"]
 
 
 async def test_context_resolution_handles_this_project_follow_up():
@@ -189,6 +221,7 @@ async def test_identity_query_routes_through_resume_retrieval():
     assert result["retrieval_sources"] == ["resume"]
     assert result["resume_context"] == "Resume data"
     assert result["final_answer"] == "Grounded answer for Alex: Who are you?"
+    assert result["suggested_prompts"] == ["Ask about Alex's architecture"]
     assert result["node_trace"] == [
         "ingest_user_message",
         "resolve_context",
@@ -199,6 +232,7 @@ async def test_identity_query_routes_through_resume_retrieval():
         "retrieve_resume",
         "merge_normalize_context",
         "generate_answer",
+        "generate_suggestions",
         "save_memory",
     ]
 
@@ -256,7 +290,12 @@ async def test_skill_query_can_plan_multiple_sources():
     assert "retrieve_projects" in result["node_trace"]
     assert "retrieve_resume" in result["node_trace"]
     assert "retrieve_docs" not in result["node_trace"]
-    assert result["node_trace"][-3:] == ["merge_normalize_context", "generate_answer", "save_memory"]
+    assert result["node_trace"][-4:] == [
+        "merge_normalize_context",
+        "generate_answer",
+        "generate_suggestions",
+        "save_memory",
+    ]
 
 
 async def test_ambiguous_project_reference_returns_clarification():
@@ -322,6 +361,7 @@ async def test_descriptive_rewritten_query_skips_unnecessary_clarification():
     assert result["needs_clarification"] is False
     assert result["retrieval_sources"] == ["projects"]
     assert result["final_answer"].startswith("Grounded answer for Alex:")
+    assert result["suggested_prompts"] == ["Ask about Alex's architecture"]
     assert "clarification_response" not in result["node_trace"]
 
 

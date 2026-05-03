@@ -18,6 +18,13 @@ class RetrievalPlan(BaseModel):
     reason: str = Field(description="Brief explanation of why these sources are needed.")
 
 
+class SuggestedPrompts(BaseModel):
+    prompts: list[str] = Field(
+        default_factory=list,
+        description="Grounded follow-up prompts the user may naturally ask next. Return at most 3.",
+    )
+
+
 class AssistantService(Protocol):
     async def resolve_context(self, query: str, history: list[ConversationTurnState]) -> str:
         ...
@@ -29,6 +36,16 @@ class AssistantService(Protocol):
         ...
 
     async def generate_answer(self, query: str, assistant_subject: str, portfolio_context: str) -> str:
+        ...
+
+    async def generate_suggestions(
+        self,
+        query: str,
+        assistant_subject: str,
+        portfolio_context: str,
+        answer: str,
+        intent: str | None = None,
+    ) -> SuggestedPrompts:
         ...
 
     async def stream_answer(self, query: str, assistant_subject: str, portfolio_context: str) -> AsyncIterator[str]:

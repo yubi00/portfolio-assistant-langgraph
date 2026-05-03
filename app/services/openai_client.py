@@ -5,12 +5,13 @@ from langchain_openai import ChatOpenAI
 from app.config import Settings
 from app.errors import UpstreamServiceError
 from app.graph.state import ConversationTurnState
-from app.services.assistant import RelevanceDecision, RetrievalPlan
+from app.services.assistant import RelevanceDecision, RetrievalPlan, SuggestedPrompts
 from app.services.prompt_templates import (
     build_answer_messages,
     build_context_resolution_messages,
     build_relevance_messages,
     build_retrieval_planning_messages,
+    build_suggestion_messages,
 )
 
 
@@ -78,6 +79,29 @@ class OpenAIAssistantClient:
         )
         return response.text.strip()
 
+    async def generate_suggestions(
+        self,
+        query: str,
+        assistant_subject: str,
+        portfolio_context: str,
+        answer: str,
+        intent: str | None = None,
+    ) -> SuggestedPrompts:
+        structured_model = self._chat.with_structured_output(SuggestedPrompts)
+        response = await self._invoke_with_error_context(
+            "suggestion generation",
+            lambda: structured_model.ainvoke(
+                build_suggestion_messages(
+                    query=query,
+                    assistant_subject=assistant_subject,
+                    portfolio_context=portfolio_context,
+                    answer=answer,
+                    intent=intent,
+                )
+            ),
+        )
+        return SuggestedPrompts(prompts=_normalize_suggestions(response.prompts))
+
     async def stream_answer(self, query: str, assistant_subject: str, portfolio_context: str) -> AsyncIterator[str]:
         try:
             async for chunk in self._chat.astream(
@@ -115,3 +139,20 @@ class OpenAIAssistantClient:
             return await invoke()
         except Exception as exc:
             raise UpstreamServiceError(f"AI service failed during {operation}.") from exc
+
+
+def _normalize_suggestions(prompts: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for prompt in prompts:
+        clean_prompt = " ".join(prompt.split()).strip()
+        if not clean_prompt:
+            continue
+        key = clean_prompt.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(clean_prompt)
+        if len(normalized) == 3:
+            break
+    return normalized

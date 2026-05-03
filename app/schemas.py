@@ -28,6 +28,7 @@ class PromptResponse(BaseModel):
     retrieval_errors: list[str] = Field(default_factory=list)
     rewritten_query: str
     node_trace: list[str]
+    suggested_prompts: list[str] = Field(default_factory=list)
 
 
 class AuthSessionRequest(BaseModel):

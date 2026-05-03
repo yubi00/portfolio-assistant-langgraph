@@ -38,5 +38,6 @@ class PortfolioState(TypedDict):
     merged_context: NotRequired[str]
     retrieval_errors: NotRequired[Annotated[list[str], operator.add]]
     final_answer: NotRequired[str]
+    suggested_prompts: NotRequired[list[str]]
     error: NotRequired[str]
     node_trace: Annotated[list[str], operator.add]
