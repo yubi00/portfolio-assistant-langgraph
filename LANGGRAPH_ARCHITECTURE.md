@@ -672,7 +672,9 @@ Decision: `generate_answer` uses `merged_context` built from planned retrieval s
 
 Problem solved: identity, skills, and work-experience answers come from the same user-provided resume source.
 
-Trade-off: the assistant currently assumes the resume is the primary identity source. If future requirements need separate profile metadata, that should be introduced as a genuinely distinct source instead of a thin wrapper around the resume.
+Answer generation also has an explicit conversation-style contract. Broad profile questions should read like a sharp human intro instead of a resume dump, subjective project questions should use natural preference wording when curated preference metadata exists, and detailed follow-up questions should expand with concrete evidence.
+
+Trade-off: the assistant currently assumes the resume is the primary identity source. If future requirements need separate profile metadata, that should be introduced as a genuinely distinct source instead of a thin wrapper around the resume. Prompt-level style rules improve answer quality without adding another graph node, but they are still model-following instructions rather than deterministic formatting.
 
 ---
 
