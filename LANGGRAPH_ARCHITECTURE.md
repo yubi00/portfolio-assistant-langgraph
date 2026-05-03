@@ -215,17 +215,17 @@ sequenceDiagram
     participant CF as Cloudflare Turnstile
     participant API as LangGraph API
 
-    B->>API: POST /auth/token<br/>credentials: include
+    B->>API: POST /auth/token<br/>credentials include
     API-->>B: 401 AUTH_REQUIRED<br/>if refresh cookie missing/expired
     B->>CF: execute Turnstile
     CF-->>B: turnstile_token
-    B->>API: POST /auth/session<br/>{turnstile_token}<br/>credentials: include
+    B->>API: POST /auth/session<br/>turnstile_token<br/>credentials include
     API->>CF: verify token server-side
     CF-->>API: success
-    API-->>B: 200 + Set-Cookie refresh_token<br/>HttpOnly; Secure; SameSite
-    B->>API: POST /auth/token<br/>credentials: include
-    API-->>B: {access_token, expires_in}
-    B->>API: POST /prompt or /prompt/stream<br/>Authorization: Bearer access_token
+    API-->>B: 200 Set-Cookie refresh_token<br/>HttpOnly, Secure, SameSite
+    B->>API: POST /auth/token<br/>credentials include
+    API-->>B: access_token and expires_in
+    B->>API: POST /prompt or /prompt/stream<br/>Authorization Bearer access_token
 ```
 
 The refresh token is a longer-lived app-owned JWT stored in an HttpOnly cookie. The access token is a short-lived app-owned JWT returned to the frontend and kept in memory. Both tokens use `HS256` through the maintained `PyJWT` library and include token type, session id, issuer, audience, issued-at, expiry, and token id claims.
