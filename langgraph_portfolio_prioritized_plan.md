@@ -154,6 +154,12 @@ Checkpointer decision:
 - do not adopt LangGraph checkpointers in this repo yet
 - revisit checkpointers only if we need durable sessions across restarts, multi-instance/shared memory, human-in-the-loop interrupt/resume, or broader graph-state persistence than bounded chat history
 
+Long-term memory decision:
+- do not add persistent visitor/user memory until there is a clearly defined product workflow that needs it
+- current short-term session memory is enough for contextual follow-ups
+- use explicit curated portfolio metadata for owner-controlled facts such as featured projects, proud-project rationale, and preferred positioning
+- revisit long-term visitor memory only after auth/frontend requirements define identity, consent, clear-memory/delete behavior, and actual user value
+
 ---
 
 ## Phase 7 - FastAPI Integration
@@ -187,9 +193,10 @@ Status: partially complete. The current streaming cut adds an SSE route with `se
 - SHOULD [x] Request/session correlation across API and graph logs
 - SHOULD [x] Node-level tracing
 - SHOULD [x] Optional structured JSON logging
+- SHOULD [x] Log LLM token usage per node and aggregate total for each graph run
 - NICE [ ] LangSmith integration
 
-Status: partially complete. Local logging exists with request/session-aware API and graph correlation, and JSON logging is available as an opt-in mode. External tracing remains future work.
+Status: partially complete. Local logging exists with request/session-aware API and graph correlation, JSON logging is available as an opt-in mode, and LLM-backed graph nodes log token usage when provider metadata is available. External tracing remains future work.
 
 ---
 
@@ -331,6 +338,7 @@ Guiding principle:
 
 - SHOULD [x] Enrich `projects` retrieval with README content
 - SHOULD [x] Add featured project detail
+- SHOULD [x] Add in-memory TTL caching for GitHub repository and README retrieval
 - SHOULD [ ] Add relevance scoring/ranking so project answers prefer the best-matching projects instead of mostly recent repositories
 - SHOULD [x] Add resume section-aware chunking in the resume embeddings/vector phase
 - SHOULD [x] Add clarification behavior for ambiguous follow-up questions instead of guessing

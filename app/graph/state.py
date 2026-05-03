@@ -7,6 +7,14 @@ class ConversationTurnState(TypedDict):
     assistant: str
 
 
+class TokenUsageState(TypedDict):
+    node: str
+    operation: str
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+
 class PortfolioState(TypedDict):
     """Shared graph state.
 
@@ -39,5 +47,7 @@ class PortfolioState(TypedDict):
     retrieval_errors: NotRequired[Annotated[list[str], operator.add]]
     final_answer: NotRequired[str]
     suggested_prompts: NotRequired[list[str]]
+    llm_usage: NotRequired[Annotated[list[TokenUsageState], operator.add]]
+    llm_usage_total: NotRequired[dict[str, int]]
     error: NotRequired[str]
     node_trace: Annotated[list[str], operator.add]

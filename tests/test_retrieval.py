@@ -151,6 +151,55 @@ async def test_project_retrieval_enriches_repositories_with_readme(tmp_path, mon
     assert "- project-without-readme" in result.content
 
 
+async def test_project_retrieval_uses_in_memory_github_cache(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    fake_client = FakeGitHubClient()
+    monkeypatch.setattr(retrieval_module.httpx, "AsyncClient", lambda timeout: fake_client)
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            GITHUB_OWNER="alex",
+            GITHUB_README_MAX_CHARS=80,
+            GITHUB_CACHE_TTL_SECONDS=900,
+        )
+    )
+
+    first_result = await service.retrieve_projects()
+    second_result = await service.retrieve_projects()
+
+    assert first_result.error is None
+    assert second_result.error is None
+    assert first_result.content == second_result.content
+    assert fake_client.get_calls.count("repos") == 1
+    assert fake_client.get_calls.count("readme:project-with-readme") == 1
+    assert fake_client.get_calls.count("readme:project-with-readme-api") == 1
+    assert fake_client.get_calls.count("readme:project-without-readme") == 1
+
+
+async def test_project_retrieval_cache_can_be_disabled_with_zero_ttl(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    fake_client = FakeGitHubClient()
+    monkeypatch.setattr(retrieval_module.httpx, "AsyncClient", lambda timeout: fake_client)
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            GITHUB_OWNER="alex",
+            GITHUB_README_MAX_CHARS=80,
+            GITHUB_CACHE_TTL_SECONDS=0,
+        )
+    )
+
+    await service.retrieve_projects()
+    await service.retrieve_projects()
+
+    assert fake_client.get_calls.count("repos") == 2
+    assert fake_client.get_calls.count("readme:project-with-readme") == 2
+
+
 async def test_project_retrieval_keeps_metadata_when_readme_is_missing(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(retrieval_module.httpx, "AsyncClient", lambda timeout: FakeGitHubClient(readme_status=404))
@@ -302,6 +351,7 @@ class FakeResponse:
 class FakeGitHubClient:
     def __init__(self, readme_status=200):
         self._readme_status = readme_status
+        self.get_calls = []
 
     async def __aenter__(self):
         return self
@@ -311,6 +361,7 @@ class FakeGitHubClient:
 
     async def get(self, url, headers=None, params=None):
         if url.endswith("/users/alex/repos"):
+            self.get_calls.append("repos")
             return FakeResponse(
                 [
                     {
@@ -346,13 +397,16 @@ class FakeGitHubClient:
                 ]
             )
         if url.endswith("/repos/alex/project-with-readme/readme"):
+            self.get_calls.append("readme:project-with-readme")
             encoded = base64.b64encode(
                 b"# Project\n\nThis project uses LangGraph and OpenAI for assistant orchestration."
             ).decode("utf-8")
             return FakeResponse({"content": encoded}, status_code=self._readme_status)
         if url.endswith("/repos/alex/project-without-readme/readme"):
+            self.get_calls.append("readme:project-without-readme")
             return FakeResponse({}, status_code=404)
         if url.endswith("/repos/alex/project-with-readme-api/readme"):
+            self.get_calls.append("readme:project-with-readme-api")
             encoded = base64.b64encode(
                 b"# Project API\n\nThis project exposes a focused API for portfolio questions."
             ).decode("utf-8")

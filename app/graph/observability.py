@@ -106,6 +106,12 @@ def _update_summary(update: dict[str, Any]) -> str:
     summary_parts = []
     for key in visible_keys:
         value = update[key]
+        if key == "llm_usage" and isinstance(value, list) and value:
+            summary_parts.append(f"llm_usage={_format_llm_usage(value[-1])}")
+            continue
+        if key == "llm_usage_total" and isinstance(value, dict):
+            summary_parts.append(f"llm_usage_total={_format_token_counts(value)}")
+            continue
         if isinstance(value, str):
             summary_parts.append(f"{key}={_shorten(value)!r}")
         elif isinstance(value, list):
@@ -120,6 +126,19 @@ def _shorten(value: str) -> str:
     if len(normalized) <= MAX_LOG_VALUE_LENGTH:
         return normalized
     return normalized[: MAX_LOG_VALUE_LENGTH - 3] + "..."
+
+
+def _format_llm_usage(event: dict[str, Any]) -> str:
+    operation = event.get("operation", "unknown")
+    return f"{operation}({_format_token_counts(event)})"
+
+
+def _format_token_counts(value: dict[str, Any]) -> str:
+    return (
+        f"input={int(value.get('input_tokens', 0))}, "
+        f"output={int(value.get('output_tokens', 0))}, "
+        f"total={int(value.get('total_tokens', 0))}"
+    )
 
 
 def skipped_update(node_name: NodeName, reason: str) -> dict[str, Any]:

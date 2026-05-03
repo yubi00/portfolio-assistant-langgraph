@@ -323,6 +323,7 @@ The first retrieval implementation uses:
 - GitHub REST API for `projects`; forks are excluded by default for "built projects" accuracy
 - best-effort README enrichment for selected repositories, bounded by `GITHUB_README_MAX_CHARS`
 - focused named-repository retrieval for project deep dives, bounded by `GITHUB_TARGET_README_MAX_CHARS`
+- in-memory TTL caching for GitHub repository metadata and README excerpts, controlled by `GITHUB_CACHE_TTL_SECONDS`
 - vector-backed resume retrieval from Neon pgvector when `NEON_DATABASE_URL_STRING` is configured
 - local text/markdown files for `docs`
 - local file override for `resume` when an explicit `resume_path` is supplied
@@ -342,12 +343,13 @@ Project retrieval strategy:
 - Broad project questions format the most recent `GITHUB_PROJECTS_LIMIT` repositories and fetch bounded README excerpts when available.
 - Named project questions, including context-resolved follow-ups, focus retrieval on the matching repository and fetch a larger README excerpt for deeper answers.
 - Subjective project preference questions, such as "most proud of", "favorite", "flagship", or "most impressive", prioritize curated featured project metadata when available.
-- Later: optionally pull GitHub pinned repositories through GraphQL, add scoring, and add a cache policy.
+- GitHub repository lists and README excerpts are cached in-process for a short TTL to reduce latency and avoid repeated GitHub calls for common portfolio questions.
+- Later: optionally pull GitHub pinned repositories through GraphQL and add scoring.
 
 Problem solved: "what projects has this person built?" should not treat forked repositories as owned work.
 Project-specific questions should not dump unrelated repositories into context when the user clearly asks about one repo.
 
-Trade-off: excluding forks may hide meaningful fork-based contributions. README fetches are best-effort, so repositories without a README still work but provide less detail. Named-repository matching depends on the repo name appearing in the rewritten query; future scoring or embeddings can improve fuzzy project matching.
+Trade-off: excluding forks may hide meaningful fork-based contributions. README fetches are best-effort, so repositories without a README still work but provide less detail. Named-repository matching depends on the repo name appearing in the rewritten query; future scoring or embeddings can improve fuzzy project matching. The GitHub cache is process-local and TTL-based, so it is simple and fast but not shared across multiple API instances.
 
 Resume strategy:
 
@@ -578,6 +580,8 @@ Problem solved: follow-up questions can now work across API requests, not just i
 
 Trade-off: this store is process-local and non-durable. Sessions are lost on restart and do not scale across multiple app instances. This is acceptable for the current learning phase; LangGraph checkpointers are deferred until the project needs durable sessions, multi-instance memory, interrupt/resume workflows, or broader persisted graph state.
 
+Long-term visitor memory is intentionally deferred. The current product goal only needs bounded short-term memory for contextual follow-ups. Persistent user memory would require a clear workflow, authenticated identity, consent, and deletion semantics. Owner-controlled portfolio facts should live in explicit curated metadata, not implicit learned memory.
+
 ---
 
 ## Module Boundaries
@@ -748,11 +752,11 @@ Trade-off: fake-service tests do not prove prompt quality. We supplement with ma
 
 Problem: `node_trace` shows the final path, but it does not show duration, intermediate updates, or where a run is currently spending time.
 
-Decision: use Python's standard `logging` module with a central formatter, CLI log-level controls, node start/done/error logs, route decision logs, and API-generated `request_id` / `session_id` correlation carried into graph state.
+Decision: use Python's standard `logging` module with a central formatter, CLI log-level controls, node start/done/error logs, route decision logs, LLM token usage logs, and API-generated `request_id` / `session_id` correlation carried into graph state.
 
-Problem solved: local runs expose graph execution in real time without adding a new observability vendor.
+Problem solved: local runs expose graph execution in real time without adding a new observability vendor. LLM-backed nodes show input, output, and total tokens when the provider returns usage metadata, and the final memory node logs aggregate token usage for the whole run.
 
-Trade-off: plain text logs are easier to read locally, while structured JSON logs are better for aggregation. The current implementation supports both, with text as the default and JSON as an opt-in mode.
+Trade-off: plain text logs are easier to read locally, while structured JSON logs are better for aggregation. The current implementation supports both, with text as the default and JSON as an opt-in mode. Token usage is logged for observability and cost analysis, not exposed as part of the public API contract.
 
 ---
 

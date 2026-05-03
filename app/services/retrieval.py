@@ -1,5 +1,6 @@
 import logging
 import unicodedata
+from time import monotonic
 from pathlib import Path
 from typing import Protocol
 import base64
@@ -17,6 +18,8 @@ from app.services.resume_vector_store import RetrievedChunk, ResumeVectorStore
 
 
 logger = logging.getLogger("app.services.retrieval")
+
+CacheEntry = tuple[float, object]
 
 
 class RetrievalResult(BaseModel):
@@ -52,6 +55,8 @@ class ConfiguredPortfolioRetrievalService:
             else _load_default_resume_source()
         )
         self._featured_projects = load_featured_projects(settings.featured_projects_path)
+        self._github_repos_cache: CacheEntry | None = None
+        self._github_readme_cache: dict[tuple[str, int], CacheEntry] = {}
 
     async def retrieve_projects(self, query: str | None = None) -> RetrievalResult:
         if not self._settings.github_owner:
@@ -76,9 +81,7 @@ class ConfiguredPortfolioRetrievalService:
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(url, headers=headers, params=params)
-                response.raise_for_status()
-                repos = response.json()
+                repos = await self._fetch_github_repositories(client, url, headers, params)
                 if not isinstance(repos, list) or not repos:
                     return RetrievalResult(
                         source=RetrievalSource.PROJECTS,
@@ -96,7 +99,7 @@ class ConfiguredPortfolioRetrievalService:
 
                 target_repo = _find_target_repository(query, repos)
                 if target_repo:
-                    readmes = await _fetch_repository_readmes(
+                    readmes = await self._fetch_repository_readmes_cached(
                         client=client,
                         api_base_url=self._settings.github_api_base_url,
                         owner=self._settings.github_owner,
@@ -121,7 +124,7 @@ class ConfiguredPortfolioRetrievalService:
                     limit=self._settings.github_projects_limit,
                     query=query,
                 )
-                readmes = await _fetch_repository_readmes(
+                readmes = await self._fetch_repository_readmes_cached(
                     client=client,
                     api_base_url=self._settings.github_api_base_url,
                     owner=self._settings.github_owner,
@@ -144,6 +147,73 @@ class ConfiguredPortfolioRetrievalService:
                 query=query,
             ),
         )
+
+    async def _fetch_github_repositories(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        headers: dict[str, str],
+        params: dict[str, object],
+    ) -> list[dict]:
+        cached = self._get_cache_value(self._github_repos_cache)
+        if isinstance(cached, list):
+            logger.debug("GitHub repositories cache hit | owner=%s", self._settings.github_owner)
+            return cached
+
+        logger.debug("GitHub repositories cache miss | owner=%s", self._settings.github_owner)
+        response = await client.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        repos = response.json()
+        if isinstance(repos, list):
+            self._github_repos_cache = self._new_cache_entry(repos)
+        return repos
+
+    async def _fetch_repository_readmes_cached(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        api_base_url: str,
+        owner: str,
+        headers: dict[str, str],
+        repos: list[dict],
+        max_chars: int,
+    ) -> dict[str, str]:
+        readmes: dict[str, str] = {}
+        for repo in repos:
+            name = repo.get("name")
+            if not name:
+                continue
+            cache_key = (str(name), max_chars)
+            cached = self._get_cache_value(self._github_readme_cache.get(cache_key))
+            if isinstance(cached, str):
+                logger.debug("GitHub README cache hit | repo=%s | max_chars=%s", name, max_chars)
+                readme = cached
+            else:
+                logger.debug("GitHub README cache miss | repo=%s | max_chars=%s", name, max_chars)
+                readme = await _fetch_repository_readme(
+                    client=client,
+                    api_base_url=api_base_url,
+                    owner=owner,
+                    repo=str(name),
+                    headers=headers,
+                    max_chars=max_chars,
+                )
+                self._github_readme_cache[cache_key] = self._new_cache_entry(readme)
+            if readme:
+                readmes[str(name)] = readme
+        return readmes
+
+    def _get_cache_value(self, entry: CacheEntry | None) -> object | None:
+        if not entry:
+            return None
+        expires_at, value = entry
+        if expires_at <= monotonic():
+            return None
+        return value
+
+    def _new_cache_entry(self, value: object) -> CacheEntry:
+        ttl_seconds = max(0, self._settings.github_cache_ttl_seconds)
+        return (monotonic() + ttl_seconds, value)
 
     async def retrieve_resume(self, path_override: str | None = None, query: str | None = None) -> RetrievalResult:
         if path_override:

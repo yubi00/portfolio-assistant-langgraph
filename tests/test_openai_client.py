@@ -44,6 +44,66 @@ async def test_generate_answer_wraps_upstream_failure():
 
 
 @pytest.mark.asyncio
+async def test_generate_answer_records_token_usage():
+    async def fake_ainvoke(_messages):
+        return SimpleNamespace(
+            text="answer",
+            usage_metadata={
+                "input_tokens": 10,
+                "output_tokens": 4,
+                "total_tokens": 14,
+            },
+        )
+
+    client = OpenAIAssistantClient(_test_settings())
+    client._chat = SimpleNamespace(ainvoke=fake_ainvoke)
+
+    answer = await client.generate_answer("What projects?", "Alex", "Project data")
+
+    assert answer == "answer"
+    assert client.consume_token_usage("answer_generation") == {
+        "input_tokens": 10,
+        "output_tokens": 4,
+        "total_tokens": 14,
+    }
+    assert client.consume_token_usage("answer_generation") is None
+
+
+@pytest.mark.asyncio
+async def test_classify_relevance_records_structured_token_usage():
+    async def fake_ainvoke(_messages):
+        return {
+            "raw": SimpleNamespace(
+                usage_metadata={
+                    "input_tokens": 8,
+                    "output_tokens": 2,
+                    "total_tokens": 10,
+                }
+            ),
+            "parsed": openai_client_module.RelevanceDecision(
+                route="portfolio_query",
+                is_relevant=True,
+                intent="projects",
+            ),
+            "parsing_error": None,
+        }
+
+    client = OpenAIAssistantClient(_test_settings())
+    client._chat = SimpleNamespace(
+        with_structured_output=lambda _model, include_raw=False: SimpleNamespace(ainvoke=fake_ainvoke)
+    )
+
+    decision = await client.classify_relevance("What projects?", "Alex")
+
+    assert decision.intent == "projects"
+    assert client.consume_token_usage("relevance_classification") == {
+        "input_tokens": 8,
+        "output_tokens": 2,
+        "total_tokens": 10,
+    }
+
+
+@pytest.mark.asyncio
 async def test_generate_suggestions_returns_normalized_structured_prompts():
     async def fake_ainvoke(_messages):
         return SuggestedPrompts(
@@ -58,7 +118,7 @@ async def test_generate_suggestions_returns_normalized_structured_prompts():
 
     client = OpenAIAssistantClient(_test_settings())
     client._chat = SimpleNamespace(
-        with_structured_output=lambda _model: SimpleNamespace(ainvoke=fake_ainvoke)
+        with_structured_output=lambda _model, include_raw=False: SimpleNamespace(ainvoke=fake_ainvoke)
     )
 
     suggestions = await client.generate_suggestions(
@@ -80,7 +140,7 @@ async def test_generate_suggestions_returns_normalized_structured_prompts():
 async def test_generate_suggestions_wraps_upstream_failure():
     client = OpenAIAssistantClient(_test_settings())
     client._chat = SimpleNamespace(
-        with_structured_output=lambda _model: SimpleNamespace(ainvoke=_failing_ainvoke)
+        with_structured_output=lambda _model, include_raw=False: SimpleNamespace(ainvoke=_failing_ainvoke)
     )
 
     with pytest.raises(UpstreamServiceError, match="suggestion generation"):

@@ -50,6 +50,11 @@ class PortfolioGraphNodes:
         return {
             "rewritten_query": rewritten_query,
             "node_trace": [NodeName.RESOLVE_CONTEXT],
+            **_llm_usage_update(
+                self._assistant_service,
+                NodeName.RESOLVE_CONTEXT,
+                "context_resolution",
+            ),
         }
 
     @log_node(NodeName.POLICY_GUARD)
@@ -81,6 +86,11 @@ class PortfolioGraphNodes:
             "intent": decision.intent,
             "route": decision.route,
             "node_trace": [NodeName.CLASSIFY_RELEVANCE],
+            **_llm_usage_update(
+                self._assistant_service,
+                NodeName.CLASSIFY_RELEVANCE,
+                "relevance_classification",
+            ),
         }
 
     @log_node(NodeName.CHECK_AMBIGUITY)
@@ -117,6 +127,11 @@ class PortfolioGraphNodes:
             "retrieval_sources": [source.value for source in plan.sources],
             "retrieval_reason": plan.reason,
             "node_trace": [NodeName.PLAN_RETRIEVAL],
+            **_llm_usage_update(
+                self._assistant_service,
+                NodeName.PLAN_RETRIEVAL,
+                "retrieval_planning",
+            ),
         }
 
     @log_node(NodeName.RETRIEVE_PROJECTS)
@@ -178,6 +193,11 @@ class PortfolioGraphNodes:
         return {
             "final_answer": answer,
             "node_trace": [NodeName.GENERATE_ANSWER],
+            **_llm_usage_update(
+                self._assistant_service,
+                NodeName.GENERATE_ANSWER,
+                "answer_generation",
+            ),
         }
 
     @log_node(NodeName.GENERATE_SUGGESTIONS)
@@ -205,6 +225,11 @@ class PortfolioGraphNodes:
         return {
             "suggested_prompts": suggestions.prompts,
             "node_trace": [NodeName.GENERATE_SUGGESTIONS],
+            **_llm_usage_update(
+                self._assistant_service,
+                NodeName.GENERATE_SUGGESTIONS,
+                "suggestion_generation",
+            ),
         }
 
     @log_node(NodeName.CLARIFICATION_RESPONSE)
@@ -237,6 +262,7 @@ class PortfolioGraphNodes:
 
         return {
             "messages": existing_history,
+            "llm_usage_total": _sum_llm_usage(state.get("llm_usage", [])),
             "node_trace": [NodeName.SAVE_MEMORY],
         }
 
@@ -252,6 +278,34 @@ def _result_update(result: RetrievalResult, context_key: str, node_name: NodeNam
     if result.error:
         update["retrieval_errors"] = [result.error]
     return update
+
+
+def _llm_usage_update(assistant_service: AssistantService, node_name: NodeName, operation: str) -> dict:
+    consume = getattr(assistant_service, "consume_token_usage", None)
+    if not callable(consume):
+        return {}
+    usage = consume(operation)
+    if not usage:
+        return {}
+    return {
+        "llm_usage": [
+            {
+                "node": node_name.value,
+                "operation": operation,
+                "input_tokens": usage["input_tokens"],
+                "output_tokens": usage["output_tokens"],
+                "total_tokens": usage["total_tokens"],
+            }
+        ]
+    }
+
+
+def _sum_llm_usage(events: list[dict]) -> dict[str, int]:
+    return {
+        "input_tokens": sum(int(event.get("input_tokens", 0)) for event in events),
+        "output_tokens": sum(int(event.get("output_tokens", 0)) for event in events),
+        "total_tokens": sum(int(event.get("total_tokens", 0)) for event in events),
+    }
 
 
 SUGGESTION_INTENTS = {

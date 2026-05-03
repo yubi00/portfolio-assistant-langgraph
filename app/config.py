@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     github_include_forks: bool = Field(default=False, validation_alias="GITHUB_INCLUDE_FORKS")
     github_readme_max_chars: int = Field(default=1800, validation_alias="GITHUB_README_MAX_CHARS")
     github_target_readme_max_chars: int = Field(default=6000, validation_alias="GITHUB_TARGET_README_MAX_CHARS")
+    github_cache_ttl_seconds: int = Field(default=900, validation_alias="GITHUB_CACHE_TTL_SECONDS")
     featured_projects_path: str = Field(default="portfolio/featured_projects.json", validation_alias="FEATURED_PROJECTS_PATH")
 
     docs_path: str | None = Field(default=None, validation_alias="DOCS_PATH")

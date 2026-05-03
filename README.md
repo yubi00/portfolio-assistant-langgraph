@@ -70,6 +70,7 @@ Phase 3 adds first-pass retrieval:
 
 - `projects` from GitHub using `GITHUB_OWNER` and optional `GITHUB_TOKEN`; forks are excluded by default
 - README excerpts are fetched best-effort for each selected repository when available
+- GitHub repository metadata and README excerpts use an in-memory TTL cache controlled by `GITHUB_CACHE_TTL_SECONDS`
 - named project questions focus retrieval on the matching repository and use a larger README excerpt budget
 - `resume` from Neon pgvector when `NEON_DATABASE_URL_STRING` is configured
 - explicit `resume_path` local-file override for development and debugging
@@ -154,6 +155,8 @@ API session memory is now available through `session_id`. Omit it on the first r
 
 The current memory model is a bounded app-level session store. LangGraph checkpointers were evaluated and intentionally deferred because this repo currently only needs short-term conversational memory, not durable thread persistence.
 
+Long-term visitor memory is intentionally deferred until there is a clear product workflow, authenticated identity, consent, and deletion behavior. Owner-controlled facts should be represented through explicit portfolio metadata instead.
+
 Ambiguous follow-up questions now have a lightweight clarification guard rail. If context resolution cannot safely identify one target from recent history, the assistant asks a short clarification question instead of guessing.
 
 Streaming is available through `POST /prompt/stream` using Server-Sent Events (SSE).
@@ -222,6 +225,8 @@ For API runs, the logs now correlate transport and graph execution with:
 - `session_id`: stable across follow-up requests in the same conversation
 
 That means one `/prompt` or `/prompt/stream` call can be followed from the API log line into the graph node logs without external tracing infrastructure.
+
+LLM-backed nodes log token usage when the provider response includes it. Logs include input, output, and total tokens per node, and the final `save_memory` node logs the aggregate token total for the graph run.
 
 JSON logging is opt-in. The default remains colorized text logs for local development.
 
