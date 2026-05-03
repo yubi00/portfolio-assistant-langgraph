@@ -18,6 +18,7 @@ from app.errors import (
     app_error_response,
 )
 from app.schemas import ConversationTurn, PromptRequest, PromptResponse
+from app.services.auth import verify_prompt_authorization
 from app.services.prompt_runner import run_prompt, run_prompt_stream
 from app.services.rate_limit import ActiveStreamRegistry, client_key_from_request, rate_limit_guard
 from app.services.session_store import InMemorySessionStore, SessionNotFoundError
@@ -49,6 +50,7 @@ async def prompt(
         return _app_error_response(RateLimitExceededError())
 
     try:
+        verify_prompt_authorization(request, settings)
         session_store, session_id, effective_request = _prepare_effective_request(payload, request)
         logger.info(
             "prompt request started | request_id=%s | session_id=%s | prompt=%r",
@@ -69,10 +71,10 @@ async def prompt(
         return response
     except SessionNotFoundError as exc:
         return _handle_app_error("prompt request failed", request_id, payload.session_id, exc)
+    except AppError as exc:
+        return _handle_app_error("prompt request failed", request_id, payload.session_id, exc)
     except ValueError as exc:
         return _handle_app_error("prompt request failed", request_id, payload.session_id, BadRequestError(str(exc)))
-    except UpstreamServiceError as exc:
-        return _handle_app_error("prompt request failed", request_id, payload.session_id, exc)
     except Exception as exc:
         logger.exception(
             "prompt request failed | request_id=%s | session_id=%s | status=500",
@@ -100,13 +102,14 @@ async def prompt_stream(
         return _app_error_response(RateLimitExceededError())
 
     try:
+        verify_prompt_authorization(request, settings)
         session_store, session_id, effective_request = _prepare_effective_request(payload, request)
     except SessionNotFoundError as exc:
         return _handle_app_error("prompt stream failed", request_id, payload.session_id, exc)
+    except AppError as exc:
+        return _handle_app_error("prompt stream failed", request_id, payload.session_id, exc)
     except ValueError as exc:
         return _handle_app_error("prompt stream failed", request_id, payload.session_id, BadRequestError(str(exc)))
-    except UpstreamServiceError as exc:
-        return _handle_app_error("prompt stream failed", request_id, payload.session_id, exc)
 
     active_stream_registry: ActiveStreamRegistry = request.app.state.active_stream_registry
     if not await active_stream_registry.acquire(client_key, settings.max_active_streams_per_client):

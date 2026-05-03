@@ -28,3 +28,17 @@ class PromptResponse(BaseModel):
     retrieval_errors: list[str] = Field(default_factory=list)
     rewritten_query: str
     node_trace: list[str]
+
+
+class AuthSessionRequest(BaseModel):
+    turnstile_token: str = Field(min_length=1)
+
+
+class AuthSessionResponse(BaseModel):
+    authenticated: bool
+    refresh_expires_in: int
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    expires_in: int

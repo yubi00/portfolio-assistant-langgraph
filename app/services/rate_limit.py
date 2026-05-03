@@ -27,10 +27,14 @@ class RateLimitGuard:
         enabled: bool,
         prompt_rate_limit: str,
         prompt_stream_rate_limit: str,
+        auth_session_rate_limit: str = "3/minute",
+        auth_token_rate_limit: str = "10/minute",
     ) -> None:
         self.enabled = enabled
         self._prompt_limit = parse(prompt_rate_limit)
         self._prompt_stream_limit = parse(prompt_stream_rate_limit)
+        self._auth_session_limit = parse(auth_session_rate_limit)
+        self._auth_token_limit = parse(auth_token_rate_limit)
         self._storage = MemoryStorage()
         self._limiter = FixedWindowRateLimiter(self._storage)
 
@@ -39,6 +43,12 @@ class RateLimitGuard:
 
     def hit_prompt_stream(self, client_key: str) -> bool:
         return self._hit("prompt_stream", client_key, self._prompt_stream_limit)
+
+    def hit_auth_session(self, client_key: str) -> bool:
+        return self._hit("auth_session", client_key, self._auth_session_limit)
+
+    def hit_auth_token(self, client_key: str) -> bool:
+        return self._hit("auth_token", client_key, self._auth_token_limit)
 
     def _hit(self, scope: str, client_key: str, limit) -> bool:
         if not self.enabled:
@@ -54,11 +64,15 @@ def configure_rate_limiter(
     enabled: bool,
     prompt_rate_limit: str,
     prompt_stream_rate_limit: str,
+    auth_session_rate_limit: str = "3/minute",
+    auth_token_rate_limit: str = "10/minute",
 ) -> None:
     rate_limit_guard.configure(
         enabled=enabled,
         prompt_rate_limit=prompt_rate_limit,
         prompt_stream_rate_limit=prompt_stream_rate_limit,
+        auth_session_rate_limit=auth_session_rate_limit,
+        auth_token_rate_limit=auth_token_rate_limit,
     )
 
 
@@ -97,4 +111,3 @@ class ActiveStreamRegistry:
     async def active_count(self, client_key: str) -> int:
         async with self._lock:
             return self._counts.get(client_key, 0)
-

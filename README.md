@@ -19,6 +19,7 @@ This implementation's architecture and decision log live in `LANGGRAPH_ARCHITECT
 - request/session-aware logging with optional JSON log format
 - basic upstream reliability controls with retries, timeouts, and streaming partial-answer preservation
 - public API abuse protection with request rate limits and active stream concurrency limits
+- optional browser auth for public deployments: Turnstile bootstrap, HttpOnly refresh cookie, and short-lived bearer access tokens
 
 ## What Makes It Special
 
@@ -120,6 +121,8 @@ Copy-Item .env.example .env
 ```
 
 Fill in `OPENAI_API_KEY`, `ASSISTANT_SUBJECT`, and optionally `GITHUB_OWNER` / `GITHUB_TOKEN` in `.env`. For resume RAG, also set `NEON_DATABASE_URL_STRING` and run the offline indexer after adding or updating `data/resume.md`.
+
+For public browser auth, set `REQUIRE_AUTH=true`, provide a 32+ byte `AUTH_SIGNING_SECRET`, configure `TURNSTILE_SECRET_KEY`, and set `AUTH_ALLOWED_ORIGINS` to the frontend origin list.
 
 Project README enrichment is controlled by `GITHUB_README_MAX_CHARS` for broad project lists and `GITHUB_TARGET_README_MAX_CHARS` for focused named-repository retrieval. Repositories without a README still appear with their normal metadata.
 
@@ -236,6 +239,8 @@ The API applies lightweight in-process abuse protection:
 
 - `/prompt` rate limit via `PROMPT_RATE_LIMIT`
 - `/prompt/stream` rate limit via `PROMPT_STREAM_RATE_LIMIT`
+- `/auth/session` rate limit via `AUTH_SESSION_RATE_LIMIT`
+- `/auth/token` rate limit via `AUTH_TOKEN_RATE_LIMIT`
 - active SSE stream concurrency limit via `MAX_ACTIVE_STREAMS_PER_CLIENT`
 
 Defaults:
@@ -244,6 +249,8 @@ Defaults:
 RATE_LIMIT_ENABLED=true
 PROMPT_RATE_LIMIT=30/minute
 PROMPT_STREAM_RATE_LIMIT=10/minute
+AUTH_SESSION_RATE_LIMIT=3/minute
+AUTH_TOKEN_RATE_LIMIT=10/minute
 MAX_ACTIVE_STREAMS_PER_CLIENT=2
 ```
 
@@ -264,6 +271,39 @@ HTTP API errors use a stable structured shape:
 Internally, API-facing failures extend a common `AppError` base class with `status_code`, `code`, and `message`. This keeps route handlers from inventing one-off response shapes as new errors are added.
 
 Frontend clients should branch on `error.code`, not raw message text.
+
+## Browser Auth
+
+The auth flow is designed as a generic browser-safe contract for public portfolio or SaaS-style clients:
+
+1. Frontend tries `POST /auth/token` with `credentials: "include"`.
+2. If no valid refresh cookie exists, frontend runs Cloudflare Turnstile.
+3. Frontend calls `POST /auth/session` with `{ "turnstile_token": "..." }`.
+4. Backend verifies Turnstile and sets a refresh token in an `HttpOnly` cookie.
+5. Frontend calls `POST /auth/token` again.
+6. Backend reads the refresh cookie and returns `{ "access_token": "...", "expires_in": 60 }`.
+7. Frontend sends `Authorization: Bearer <access_token>` to `/prompt` and `/prompt/stream`.
+
+This keeps the longer-lived refresh token out of JavaScript while avoiding ambient cookie auth on expensive assistant endpoints. The access token is short-lived and frontend-managed in memory.
+
+Auth settings:
+
+```powershell
+REQUIRE_AUTH=false
+AUTH_SIGNING_SECRET=
+AUTH_REFRESH_TTL_SECONDS=1800
+AUTH_ACCESS_TTL_SECONDS=60
+AUTH_REFRESH_COOKIE_NAME=refresh_token
+AUTH_COOKIE_SAMESITE=none
+AUTH_COOKIE_SECURE=true
+AUTH_COOKIE_PATH=/auth
+AUTH_COOKIE_DOMAIN=
+AUTH_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+TURNSTILE_SECRET_KEY=
+TURNSTILE_BYPASS=false
+```
+
+`TURNSTILE_BYPASS=true` is for local development only. Do not enable it in production.
 
 ## Current Limitation
 

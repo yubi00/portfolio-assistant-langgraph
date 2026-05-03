@@ -215,9 +215,9 @@ Status: initial architecture comparison complete.
 
 Notes:
 - The LangGraph implementation is stronger for orchestration because graph state, route decisions, retrieval planning, retrieval execution, context merge, answer generation, and memory are explicit and testable.
-- The old `yubi-ai-portfolio-api` is still ahead on production hardening: auth, rate limiting, public endpoint protection, and deployment security.
-- Do not copy the old MCP architecture into this repo for now. The current goal is a LangGraph-native assistant, not an MCP client/server split.
-- Selectively bring over production hardening ideas later when preparing to replace the old public backend.
+- Production hardening should be implemented directly in this LangGraph-native backend: auth, rate limiting, public endpoint protection, and deployment security.
+- Do not introduce an MCP client/server split in this repo for now. Keep orchestration LangGraph-native.
+- Keep production hardening frontend-agnostic so the backend can support a portfolio UI first and a user-centric SaaS product later.
 
 ---
 
@@ -254,11 +254,11 @@ Notes:
 - MUST [x] Add deterministic policy guard before relevance classification
 - MUST [x] Add route-level rate limiting for `/prompt` and `/prompt/stream`
 - MUST [x] Add streaming concurrency protection
-- MUST [ ] Add public auth gate suitable for a portfolio site
-- MUST [ ] Add browser-friendly auth flow before enabling auth in production
-- MUST [ ] Add secure CORS/origin policy for public deployment
+- MUST [x] Add public auth gate suitable for a portfolio site
+- MUST [x] Add browser-friendly auth flow before enabling auth in production
+- MUST [x] Add secure CORS/origin policy for public deployment
 - MUST [ ] Hide development-only docs/routes in production where appropriate
-- MUST [ ] Ensure client-visible errors do not leak internal service details
+- MUST [x] Ensure client-visible errors do not leak internal service details
 - SHOULD [x] Add request abuse logging and rate-limit hit logging
 - SHOULD [x] Add security-focused tests around auth, rate limits, and streaming errors
 - NICE [ ] Move rate-limit/session state to shared storage if deploying more than one instance
@@ -272,23 +272,30 @@ Notes:
 - `/prompt/stream` also has an active-stream concurrency guard to protect long-running SSE responses.
 - HTTP API errors now use a stable `{error: {status, code, message}}` shape so clients can branch on error codes.
 - API-facing errors now extend a common `AppError` base class so status codes, machine-readable error codes, and safe messages are owned by typed errors instead of duplicated in route handlers.
-- Use the old `yubi-ai-portfolio-api` security hardening as reference material, not as code to copy blindly.
-- Auth is required before this replaces the old public system because the API can incur real OpenAI/GitHub cost.
+- Auth implementation target: provide a generic browser-safe contract for public clients.
+  `POST /auth/session` verifies Cloudflare Turnstile and sets an HttpOnly refresh cookie.
+  `POST /auth/token` reads that refresh cookie and returns a short-lived access token.
+  `/prompt` and `/prompt/stream` require `Authorization: Bearer <access_token>` only when `REQUIRE_AUTH=true`.
+- Auth design decisions:
+  use a maintained JWT library for signed refresh/access tokens, keep access tokens in frontend memory, keep the refresh token in an HttpOnly cookie, and keep expensive endpoints explicit-bearer-token authenticated rather than ambient-cookie authenticated.
+- Turnstile remains the first human-verification gate. A future identity provider such as GitHub OAuth can later replace or augment the session bootstrap while preserving the same app-owned refresh/access token model.
+- Auth routes now use structured API errors, origin allowlisting, dedicated auth rate limits, 32+ byte HMAC signing secret validation, and async Turnstile verification.
+- Auth is required before public production deployment because the API can incur real OpenAI/GitHub cost.
 - Keep this separate from orchestration work so the graph remains simple and testable.
 
 ---
 
-## Phase 14 - Frontend Migration
+## Phase 14 - Frontend Integration
 
-- MUST [ ] Reuse the existing `ai-portfolio` React terminal frontend
-- MUST [ ] Update non-streaming `/prompt` adapter for the LangGraph response shape
-- MUST [ ] Update `/prompt/stream` SSE adapter for LangGraph event names
+- MUST [ ] Build or adapt a React client against the LangGraph API contract
+- MUST [ ] Implement non-streaming `/prompt` adapter for the LangGraph response shape
+- MUST [ ] Implement `/prompt/stream` SSE adapter for LangGraph event names
 - MUST [ ] Map backend progress events to safe user-facing status labels
 - MUST [ ] Preserve `session_id` reuse for follow-up questions
 - MUST [ ] Hide raw graph internals from the public UI
-- SHOULD [ ] Reuse existing frontend auth utilities after backend auth is implemented
+- SHOULD [ ] Implement browser auth client for `/auth/session`, `/auth/token`, and bearer-token prompt calls
 - SHOULD [ ] Add a debug-only mode for traces and retrieval metadata
-- NICE [ ] Keep old-backend compatibility temporarily behind an adapter flag if useful during migration
+- NICE [ ] Keep UI implementation decoupled enough to support future SaaS onboarding and account flows
 
 Status: planned.
 
@@ -306,7 +313,7 @@ Status: documented for later, not part of the current backend hardening scope.
 Notes:
 - Longer-term SaaS direction lives in `SAAS_READINESS_PLAN.md`.
 - Do not build billing, multi-user onboarding, resume upload, or GitHub OAuth before the public security hardening phase is complete.
-- The immediate priority remains making this backend safe and stable enough to replace the old public system.
+- The immediate priority remains making this backend safe and stable enough for public deployment.
 
 ---
 
@@ -358,9 +365,9 @@ Expected value:
 
 1. Project relevance scoring/ranking
 2. Structured answer modes for concise vs detailed responses
-3. Performance comparison against the old system
+3. Performance baseline against current public behavior
 4. Public production hardening: auth, rate limits, CORS, streaming abuse protection
-5. Frontend migration to the LangGraph backend
+5. Frontend integration against the LangGraph backend
 6. Larger-doc RAG only when needed
 
 ---

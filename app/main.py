@@ -2,13 +2,16 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.auth import router as auth_router
 from app.api.prompt import router as prompt_router
 from app.config import SettingsError, require_settings
 from app.errors import ConfigurationError, app_error_response
 from app.graph.builder import get_portfolio_graph
 from app.logging_config import configure_logging
+from app.services.auth import allowed_origins
 from app.services.rate_limit import (
     ActiveStreamRegistry,
     configure_rate_limiter,
@@ -41,6 +44,8 @@ def create_app() -> FastAPI:
             enabled=settings.rate_limit_enabled,
             prompt_rate_limit=settings.prompt_rate_limit,
             prompt_stream_rate_limit=settings.prompt_stream_rate_limit,
+            auth_session_rate_limit=settings.auth_session_rate_limit,
+            auth_token_rate_limit=settings.auth_token_rate_limit,
         )
     except ValueError as exc:
         logger.error("Invalid rate limit configuration: %s", exc)
@@ -53,6 +58,14 @@ def create_app() -> FastAPI:
         ttl_minutes=settings.session_ttl_minutes,
     )
     app.state.active_stream_registry = ActiveStreamRegistry()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins(settings),
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
+    app.include_router(auth_router)
     app.include_router(prompt_router)
 
     @app.get("/")

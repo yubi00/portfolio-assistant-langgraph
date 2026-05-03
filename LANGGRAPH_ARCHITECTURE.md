@@ -19,7 +19,7 @@ Implemented phases:
 - Phase 12A/B: offline resume embedding ingestion, Neon pgvector storage, semantic resume chunking, and vector-backed resume retrieval
 - Clarification guard rail: deterministic ambiguity detection for risky follow-up references
 - Policy guard: deterministic blocking for prompt injection, prompt extraction, unsafe fabrication, secrets, and harmful-content requests
-- Public API protection: in-process request rate limiting and active stream concurrency limiting
+- Public API protection: browser auth, in-process request rate limiting, and active stream concurrency limiting
 
 Not implemented yet:
 
@@ -40,7 +40,7 @@ flowchart LR
     Runner["Prompt Runner\ntransport-independent"]
     Graph["LangGraph StateGraph"]
     Policy["Policy Guard\ndeterministic"]
-    Protection["API Protection\nrate limits + stream concurrency"]
+    Protection["API Protection\nauth + rate limits + stream concurrency"]
     Sessions["InMemorySessionStore\nsession_id -> history"]
     OpenAI["OpenAI via\nlangchain-openai"]
     Neon["Neon Postgres\npgvector"]
@@ -148,8 +148,9 @@ Those behaviors come from the harness. LangGraph makes them easier to compose an
 
 ## Public API Protection
 
-The public API now has two lightweight abuse-protection layers before expensive assistant work runs:
+The public API now has three lightweight abuse-protection layers before expensive assistant work runs:
 
+- optional browser auth for expensive prompt endpoints
 - request rate limiting for `/prompt`
 - request rate limiting plus active stream concurrency limiting for `/prompt/stream`
 
@@ -162,6 +163,8 @@ Configuration:
 | `RATE_LIMIT_ENABLED` | `true` | Enables/disables request rate limits |
 | `PROMPT_RATE_LIMIT` | `30/minute` | Max `/prompt` requests per client |
 | `PROMPT_STREAM_RATE_LIMIT` | `10/minute` | Max `/prompt/stream` requests per client |
+| `AUTH_SESSION_RATE_LIMIT` | `3/minute` | Max `/auth/session` requests per client |
+| `AUTH_TOKEN_RATE_LIMIT` | `10/minute` | Max `/auth/token` requests per client |
 | `MAX_ACTIVE_STREAMS_PER_CLIENT` | `2` | Max concurrent active SSE streams per client |
 
 HTTP errors use a structured response contract:
@@ -189,6 +192,42 @@ Current HTTP error codes include:
 | `PROMPT_PROCESSING_FAILED` | Unexpected prompt processing failure |
 | `RATE_LIMIT_EXCEEDED` | Request rate limit exceeded |
 | `STREAM_CONCURRENCY_LIMIT_EXCEEDED` | Too many active SSE streams for one client |
+| `AUTH_REQUIRED` | Protected endpoint needs a valid access token or refresh cookie |
+| `INVALID_TOKEN` | Token is invalid, expired, malformed, or wrong type |
+| `AUTH_CONFIGURATION_ERROR` | Auth is enabled or called but auth configuration is incomplete |
+| `ORIGIN_NOT_ALLOWED` | Browser origin is not allowlisted for auth endpoints |
+| `TURNSTILE_VERIFICATION_FAILED` | Cloudflare Turnstile verification failed |
+
+### Browser Auth Flow
+
+The browser auth contract is intentionally frontend-agnostic so it can support a public portfolio UI now and a user-centric SaaS product later.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant CF as Cloudflare Turnstile
+    participant API as LangGraph API
+
+    B->>API: POST /auth/token<br/>credentials: include
+    API-->>B: 401 AUTH_REQUIRED<br/>if refresh cookie missing/expired
+    B->>CF: execute Turnstile
+    CF-->>B: turnstile_token
+    B->>API: POST /auth/session<br/>{turnstile_token}<br/>credentials: include
+    API->>CF: verify token server-side
+    CF-->>API: success
+    API-->>B: 200 + Set-Cookie refresh_token<br/>HttpOnly; Secure; SameSite
+    B->>API: POST /auth/token<br/>credentials: include
+    API-->>B: {access_token, expires_in}
+    B->>API: POST /prompt or /prompt/stream<br/>Authorization: Bearer access_token
+```
+
+The refresh token is a longer-lived app-owned JWT stored in an HttpOnly cookie. The access token is a short-lived app-owned JWT returned to the frontend and kept in memory. Both tokens use `HS256` through the maintained `PyJWT` library and include token type, session id, issuer, audience, issued-at, expiry, and token id claims.
+
+Decision: use app-owned JWT grant/access tokens with Turnstile as the current human-verification bootstrap.
+
+Problem solved: rate limiting alone does not stop scripted browser abuse or accidental public cost spikes. Turnstile protects token issuance, and short-lived access tokens protect expensive assistant endpoints.
+
+Trade-off: this is not user identity. It proves a browser session passed Turnstile. A future identity provider such as GitHub OAuth can replace or augment the bootstrap step while preserving the same backend-owned grant/access token model.
 
 Decision: use in-memory rate limiting for the first public-hardening cut.
 

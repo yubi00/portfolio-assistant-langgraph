@@ -18,12 +18,44 @@ class BadRequestError(AppError):
     default_message = "Bad request."
 
 
+class AuthConfigurationError(AppError):
+    """Raised when auth is requested but auth configuration is incomplete."""
+
+    status_code = 503
+    code = "AUTH_CONFIGURATION_ERROR"
+    default_message = "Authentication is not configured."
+
+
+class AuthRequiredError(AppError):
+    """Raised when a protected endpoint is called without a valid access token."""
+
+    status_code = 401
+    code = "AUTH_REQUIRED"
+    default_message = "Authentication required."
+
+
 class ConfigurationError(AppError):
     """Raised when the application cannot serve requests due to invalid configuration."""
 
     status_code = 503
     code = "CONFIGURATION_ERROR"
     default_message = "Invalid application configuration."
+
+
+class InvalidTokenError(AppError):
+    """Raised when a token is malformed, expired, or otherwise invalid."""
+
+    status_code = 401
+    code = "INVALID_TOKEN"
+    default_message = "Invalid or expired token."
+
+
+class OriginNotAllowedError(AppError):
+    """Raised when a browser origin is not in the auth allowlist."""
+
+    status_code = 403
+    code = "ORIGIN_NOT_ALLOWED"
+    default_message = "Origin is not allowed."
 
 
 class RateLimitExceededError(AppError):
@@ -48,6 +80,14 @@ class StreamConcurrencyLimitExceededError(AppError):
     status_code = 429
     code = "STREAM_CONCURRENCY_LIMIT_EXCEEDED"
     default_message = "Too many active streams."
+
+
+class TurnstileVerificationError(AppError):
+    """Raised when Cloudflare Turnstile verification fails."""
+
+    status_code = 400
+    code = "TURNSTILE_VERIFICATION_FAILED"
+    default_message = "Human verification failed."
 
 
 class UpstreamServiceError(AppError):
