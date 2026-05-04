@@ -294,7 +294,7 @@ Notes:
 - Turnstile remains the first human-verification gate. A future identity provider such as GitHub OAuth can later replace or augment the session bootstrap while preserving the same app-owned refresh/access token model.
 - Auth routes now use structured API errors, origin allowlisting, dedicated auth rate limits, 32+ byte HMAC signing secret validation, and async Turnstile verification.
 - Auth is required before public production deployment because the API can incur real OpenAI/GitHub cost.
-- Vercel packaging uses `api/index.py` to export the real FastAPI app from `app.main`, plus a root `main.py` compatibility shim, `.python-version`, `requirements.txt`, `vercel.json`, and `.vercelignore`.
+- Vercel packaging mirrors the previously working API shape: a root `main.py` shim exports the real FastAPI app from `app.main`, with `.python-version`, `requirements.txt`, and `.vercelignore`.
 - Serverless caveat: current rate-limit/session/active-stream/cache state is in process memory. That is acceptable for first public smoke testing, but shared storage is required if the deployment fans out across multiple instances.
 - Keep this separate from orchestration work so the graph remains simple and testable.
 

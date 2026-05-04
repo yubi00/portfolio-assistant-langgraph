@@ -172,7 +172,7 @@ Invoke-WebRequest -Method Post http://127.0.0.1:8000/prompt/stream `
 
 ## Vercel Deployment
 
-The repo includes a Vercel Python function entry point at `api/index.py`:
+The repo includes a root `main.py` compatibility entry point for Vercel:
 
 ```python
 from app.main import app
@@ -180,15 +180,13 @@ from app.main import app
 handler = app
 ```
 
-Keep local development pointed at `app.main:app`; the `api/index.py` file exists only so Vercel can discover the FastAPI app without moving the real application package. A root `main.py` compatibility shim is also present for direct imports and older deployment tooling.
+Keep local development pointed at `app.main:app`; the root file exists only so Vercel and other deployment tooling can discover the FastAPI app without moving the real application package.
 
 Deployment files:
 
-- `api/index.py` exposes `app` and `handler` for Vercel
-- `main.py` exposes the same app for local/import compatibility
+- `main.py` exposes `app` and `handler`
 - `.python-version` pins Python 3.13
 - `requirements.txt` mirrors runtime dependencies from `pyproject.toml`
-- `vercel.json` rewrites all paths to `api/index.py` and excludes non-runtime files from the Python function bundle
 - `.vercelignore` excludes local env files, caches, tests, and private resume inputs
 
 Minimum production environment for a public deployment:
