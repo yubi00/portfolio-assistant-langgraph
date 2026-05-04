@@ -170,6 +170,48 @@ Invoke-WebRequest -Method Post http://127.0.0.1:8000/prompt/stream `
   -Body '{"prompt":"What projects has this person built?"}'
 ```
 
+## Vercel Deployment
+
+The repo includes a root `main.py` compatibility entry point for Vercel:
+
+```python
+from app.main import app
+
+handler = app
+```
+
+Keep local development pointed at `app.main:app`; the root file exists only so Vercel can discover the FastAPI app without moving the real application package.
+
+Deployment files:
+
+- `main.py` exposes `app` and `handler`
+- `.python-version` pins Python 3.13
+- `requirements.txt` mirrors runtime dependencies from `pyproject.toml`
+- `vercel.json` excludes non-runtime files from the Python function bundle
+- `.vercelignore` excludes local env files, caches, tests, and private resume inputs
+
+Minimum production environment for a public deployment:
+
+```powershell
+APP_ENV=production
+OPENAI_API_KEY=...
+ASSISTANT_SUBJECT=...
+GITHUB_OWNER=...
+GITHUB_TOKEN=...
+NEON_DATABASE_URL_STRING=...
+REQUIRE_AUTH=true
+AUTH_SIGNING_SECRET=...
+AUTH_ALLOWED_ORIGINS=https://your-frontend.example
+TURNSTILE_SECRET_KEY=...
+AUTH_COOKIE_SECURE=true
+AUTH_COOKIE_SAMESITE=none
+TURNSTILE_BYPASS=false
+```
+
+Run `portfolio-index-resume` offline before expecting resume answers from pgvector in production. The API does not create embeddings during server startup.
+
+Deployment caveat: current rate limit, session, active-stream, and GitHub cache state are in process memory. That is acceptable for the current single-instance deployment path and smoke testing, but multi-instance/serverless scale should move shared state to external storage.
+
 ## CLI
 
 One-shot prompt:

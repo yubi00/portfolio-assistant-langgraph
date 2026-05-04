@@ -268,11 +268,13 @@ Notes:
 - MUST [x] Add secure CORS/origin policy for public deployment
 - MUST [x] Hide development-only docs/routes in production where appropriate
 - MUST [x] Ensure client-visible errors do not leak internal service details
+- SHOULD [x] Add Vercel-compatible deployment entry point and runtime dependency files
 - SHOULD [x] Add request abuse logging and rate-limit hit logging
 - SHOULD [x] Add security-focused tests around auth, rate limits, and streaming errors
+- SHOULD [ ] Smoke test deployed `/`, `/auth/session`, `/auth/token`, `/prompt`, and `/prompt/stream` on Vercel with production env values
 - NICE [ ] Move rate-limit/session state to shared storage if deploying more than one instance
 
-Status: planned for public replacement readiness.
+Status: mostly complete for public replacement readiness; Vercel smoke testing remains.
 
 Notes:
 - `policy_guard` now blocks prompt injection, hidden prompt extraction, fake portfolio fabrication, secret/credential requests, and harmful-content requests before retrieval or answer generation.
@@ -292,6 +294,8 @@ Notes:
 - Turnstile remains the first human-verification gate. A future identity provider such as GitHub OAuth can later replace or augment the session bootstrap while preserving the same app-owned refresh/access token model.
 - Auth routes now use structured API errors, origin allowlisting, dedicated auth rate limits, 32+ byte HMAC signing secret validation, and async Turnstile verification.
 - Auth is required before public production deployment because the API can incur real OpenAI/GitHub cost.
+- Vercel packaging uses a root `main.py` shim that exports the real FastAPI app from `app.main`, plus `.python-version`, `requirements.txt`, `vercel.json`, and `.vercelignore`.
+- Serverless caveat: current rate-limit/session/active-stream/cache state is in process memory. That is acceptable for first public smoke testing, but shared storage is required if the deployment fans out across multiple instances.
 - Keep this separate from orchestration work so the graph remains simple and testable.
 
 ---

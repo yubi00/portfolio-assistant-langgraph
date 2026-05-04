@@ -1,0 +1,13 @@
+.env
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+tests
+resume.pdf
+data/resume.md
+data/resume.pdf
+data/processed
+SAAS_READINESS_PLAN.md
