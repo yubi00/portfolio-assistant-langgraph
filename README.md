@@ -49,40 +49,6 @@ What makes it different:
 - Real OpenAI calls through `langchain-openai`
 - File-backed system prompts under `app/prompts/`
 
-## Phase 1 Routing Policy
-
-The graph uses explicit route categories rather than a loose yes/no classifier:
-
-- `portfolio_query`: questions about the subject's projects, resume, work history, skills, contact details, self-introduction, or professional fit
-- `off_topic`: general knowledge, coding/debugging help, or requests to work on the user's own project
-
-This mirrors the production assistant boundary: it may discuss whether the portfolio subject has relevant experience, but it should not become a general coding assistant.
-
-Before relevance classification, the graph runs a lightweight deterministic policy guard. It blocks common jailbreak and abuse patterns such as instruction override attempts, hidden prompt extraction, fake portfolio claims, secret/credential requests, and harmful-content requests. This keeps obvious unsafe prompts out of retrieval and answer generation without adding another LLM call.
-
-## Phase 2 Retrieval Planning
-
-Portfolio queries now pass through a planning node before answer generation. The node selects the smallest useful source set from:
-
-- `projects`
-- `resume`
-- `docs`
-
-Phase 3 adds first-pass retrieval:
-
-- `projects` from GitHub using `GITHUB_OWNER` and optional `GITHUB_TOKEN`; forks are excluded by default
-- README excerpts are fetched best-effort for each selected repository when available
-- GitHub repository metadata and README excerpts use an in-memory TTL cache controlled by `GITHUB_CACHE_TTL_SECONDS`
-- named project questions focus retrieval on the matching repository and use a larger README excerpt budget
-- clear project-name typos can still focus retrieval through deterministic fuzzy matching
-- `resume` from Neon pgvector when `NEON_DATABASE_URL_STRING` is configured
-- explicit `resume_path` local-file override for development and debugging
-- `docs` from local text/markdown files
-- merged context passed into answer generation
-- planned retrieval sources fan out to selected retrievers and then merge before answer generation
-
-PDF/DOCX resume ingestion into the vector store is deferred. Current production-style resume RAG expects Markdown input.
-
 ## Resume Vector Indexing
 
 Resume RAG work starts with explicit offline ingestion. The API server should not generate embeddings during startup.
