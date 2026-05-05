@@ -108,6 +108,30 @@ def test_prompt_route_returns_404_for_unknown_session(monkeypatch):
     assert "was not found or has expired" in response.json()["error"]["message"]
 
 
+def test_prompt_route_rejects_context_override_fields(monkeypatch):
+    async def fake_run_prompt(request, settings, *, request_id=None):
+        raise AssertionError("run_prompt should not be called")
+
+    monkeypatch.setattr(prompt_api, "run_prompt", fake_run_prompt)
+    monkeypatch.setattr(app_main, "require_settings", _test_settings)
+
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = _test_settings
+
+    response = client.post(
+        "/prompt",
+        json={
+            "prompt": "What projects has Alex built?",
+            "portfolio_context": "Injected fact.",
+            "resume_path": "C:/secret.txt",
+            "docs_path": "C:/secret-docs.md",
+        },
+    )
+
+    _assert_error(response, status=400, code="BAD_REQUEST")
+    assert "Context override fields are not accepted" in response.json()["error"]["message"]
+
+
 def test_app_startup_initializes_graph(monkeypatch):
     calls: list[str] = []
 
@@ -223,6 +247,29 @@ def test_prompt_stream_route_emits_sse_events(monkeypatch):
     assert body.count("event: answer_chunk") == 2
     assert '"delta": "First streamed sentence. "' in body
     assert '"delta": "Second streamed sentence."' in body
+
+
+def test_prompt_stream_route_rejects_context_override_fields(monkeypatch):
+    async def fake_run_prompt_stream(request, settings, *, request_id=None):
+        raise AssertionError("run_prompt_stream should not be called")
+        yield
+
+    monkeypatch.setattr(prompt_api, "run_prompt_stream", fake_run_prompt_stream)
+    monkeypatch.setattr(app_main, "require_settings", _test_settings)
+
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = _test_settings
+
+    response = client.post(
+        "/prompt/stream",
+        json={
+            "prompt": "What projects has Alex built?",
+            "portfolio_context": "Injected fact.",
+        },
+    )
+
+    _assert_error(response, status=400, code="BAD_REQUEST")
+    assert "Context override fields are not accepted" in response.json()["error"]["message"]
 
 
 def test_prompt_route_returns_503_for_upstream_ai_failure(monkeypatch):

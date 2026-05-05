@@ -50,6 +50,7 @@ async def prompt(
         return _app_error_response(RateLimitExceededError())
 
     try:
+        _reject_api_context_overrides(payload)
         verify_prompt_authorization(request, settings)
         session_store, session_id, effective_request = _prepare_effective_request(payload, request)
         logger.info(
@@ -102,6 +103,7 @@ async def prompt_stream(
         return _app_error_response(RateLimitExceededError())
 
     try:
+        _reject_api_context_overrides(payload)
         verify_prompt_authorization(request, settings)
         session_store, session_id, effective_request = _prepare_effective_request(payload, request)
     except SessionNotFoundError as exc:
@@ -159,6 +161,20 @@ def _prepare_effective_request(
         }
     )
     return session_store, session_id, effective_request
+
+
+def _reject_api_context_overrides(request: PromptRequest) -> None:
+    blocked_fields = [
+        field_name
+        for field_name in ("portfolio_context", "resume_path", "docs_path")
+        if getattr(request, field_name)
+    ]
+    if blocked_fields:
+        raise BadRequestError(
+            "Context override fields are not accepted by the public API: "
+            + ", ".join(blocked_fields)
+            + "."
+        )
 
 
 async def _stream_prompt_response(
