@@ -271,11 +271,13 @@ PROMPT_STREAM_RATE_LIMIT=10/minute
 AUTH_SESSION_RATE_LIMIT=3/minute
 AUTH_TOKEN_RATE_LIMIT=10/minute
 MAX_ACTIVE_STREAMS_PER_CLIENT=2
+TRUST_PROXY_HEADERS=false
 ```
 
 Set `APP_ENV=production` in public deployments to disable `/docs`, `/redoc`, and `/openapi.json`.
+Production startup also requires `REQUIRE_AUTH=true` and `TURNSTILE_BYPASS=false`; the app returns a configuration error if either guard is violated.
 
-Rate limiting uses the maintained `limits` library with in-memory storage. This is appropriate for the current single-instance deployment path. If the API is deployed across multiple instances, move rate-limit state to shared storage such as Redis.
+Rate limiting uses the maintained `limits` library with in-memory storage. By default, client identity comes from the direct request client address and ignores spoofable forwarded headers. Set `TRUST_PROXY_HEADERS=true` only when the API is reachable exclusively through a trusted proxy that sanitizes `X-Forwarded-For`. If the API is deployed across multiple instances, move rate-limit state to shared storage such as Redis.
 
 HTTP API errors use a stable structured shape:
 

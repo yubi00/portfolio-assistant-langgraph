@@ -76,9 +76,9 @@ def configure_rate_limiter(
     )
 
 
-def client_key_from_request(request: Request) -> str:
+def client_key_from_request(request: Request, *, trust_proxy_headers: bool = False) -> str:
     forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
+    if trust_proxy_headers and forwarded_for:
         return forwarded_for.split(",", 1)[0].strip()
     if request.client:
         return request.client.host

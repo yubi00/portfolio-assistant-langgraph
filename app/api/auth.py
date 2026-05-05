@@ -22,7 +22,7 @@ async def create_auth_session(
     request: Request,
     settings: Settings = Depends(get_settings),
 ) -> AuthSessionResponse | JSONResponse:
-    client_key = client_key_from_request(request)
+    client_key = client_key_from_request(request, trust_proxy_headers=settings.trust_proxy_headers)
     if not rate_limit_guard.hit_auth_session(client_key):
         logger.warning("auth session rejected | status=429 | client=%s | reason=rate_limit", client_key)
         return _app_error_response(RateLimitExceededError())
@@ -52,7 +52,7 @@ async def create_access_token(
     request: Request,
     settings: Settings = Depends(get_settings),
 ) -> AuthTokenResponse | JSONResponse:
-    client_key = client_key_from_request(request)
+    client_key = client_key_from_request(request, trust_proxy_headers=settings.trust_proxy_headers)
     if not rate_limit_guard.hit_auth_token(client_key):
         logger.warning("auth token rejected | status=429 | client=%s | reason=rate_limit", client_key)
         return _app_error_response(RateLimitExceededError())

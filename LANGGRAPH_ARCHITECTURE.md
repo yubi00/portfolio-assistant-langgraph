@@ -159,6 +159,8 @@ The public API now has three lightweight abuse-protection layers before expensiv
 
 Rate limiting uses the maintained `limits` library with `MemoryStorage` and a fixed-window strategy. The project does not hand-roll rate-limit counters or time-window math.
 
+Production startup fails closed when `APP_ENV=production` and either `REQUIRE_AUTH=false` or `TURNSTILE_BYPASS=true`. This prevents accidentally deploying the public prompt API without browser auth or with human verification bypassed.
+
 Configuration:
 
 | Setting | Default | Meaning |
@@ -170,6 +172,7 @@ Configuration:
 | `AUTH_SESSION_RATE_LIMIT` | `3/minute` | Max `/auth/session` requests per client |
 | `AUTH_TOKEN_RATE_LIMIT` | `10/minute` | Max `/auth/token` requests per client |
 | `MAX_ACTIVE_STREAMS_PER_CLIENT` | `2` | Max concurrent active SSE streams per client |
+| `TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` for rate-limit identity only behind a trusted sanitizing proxy |
 
 HTTP errors use a structured response contract:
 

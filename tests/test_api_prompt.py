@@ -167,6 +167,38 @@ def test_create_app_returns_configuration_error_app_for_invalid_rate_limit(monke
     assert "Invalid rate limit setting" in response.json()["error"]["message"]
 
 
+def test_create_app_rejects_production_without_auth(monkeypatch):
+    monkeypatch.setattr(
+        app_main,
+        "require_settings",
+        lambda: _build_test_settings(APP_ENV="production", REQUIRE_AUTH=False),
+    )
+
+    client = TestClient(create_app())
+    response = client.get("/")
+
+    _assert_error(response, status=503, code="CONFIGURATION_ERROR")
+    assert "REQUIRE_AUTH must be true" in response.json()["error"]["message"]
+
+
+def test_create_app_rejects_production_turnstile_bypass(monkeypatch):
+    monkeypatch.setattr(
+        app_main,
+        "require_settings",
+        lambda: _build_test_settings(
+            APP_ENV="production",
+            REQUIRE_AUTH=True,
+            TURNSTILE_BYPASS=True,
+        ),
+    )
+
+    client = TestClient(create_app())
+    response = client.get("/")
+
+    _assert_error(response, status=503, code="CONFIGURATION_ERROR")
+    assert "TURNSTILE_BYPASS must be false" in response.json()["error"]["message"]
+
+
 def test_unknown_route_returns_structured_http_error(monkeypatch):
     monkeypatch.setattr(app_main, "require_settings", _test_settings)
 
@@ -189,7 +221,11 @@ def test_api_docs_are_enabled_outside_production(monkeypatch):
 
 
 def test_api_docs_are_hidden_in_production(monkeypatch):
-    monkeypatch.setattr(app_main, "require_settings", lambda: _build_test_settings(APP_ENV="production"))
+    monkeypatch.setattr(
+        app_main,
+        "require_settings",
+        lambda: _build_test_settings(APP_ENV="production", REQUIRE_AUTH=True, TURNSTILE_BYPASS=False),
+    )
 
     client = TestClient(create_app())
 
@@ -320,6 +356,82 @@ def test_prompt_route_rate_limit_returns_429(monkeypatch):
 
     assert first_response.status_code == 200
     _assert_error(second_response, status=429, code="RATE_LIMIT_EXCEEDED", message="Rate limit exceeded.")
+
+
+def test_prompt_rate_limit_ignores_spoofed_forwarded_for_by_default(monkeypatch):
+    async def fake_run_prompt(request, settings, *, request_id=None):
+        return PromptResponse(
+            answer="answer",
+            session_id=request.session_id,
+            history=[{"user": request.prompt, "assistant": "answer"}],
+            is_relevant=True,
+            intent="projects",
+            route="portfolio_query",
+            retrieval_sources=["projects"],
+            retrieval_reason="Project questions need project data.",
+            retrieval_errors=[],
+            rewritten_query=request.prompt,
+            node_trace=["ingest_user_message", "generate_answer"],
+        )
+
+    settings = lambda: _build_test_settings(PROMPT_RATE_LIMIT="1/minute", TRUST_PROXY_HEADERS=False)
+    monkeypatch.setattr(prompt_api, "run_prompt", fake_run_prompt)
+    monkeypatch.setattr(app_main, "require_settings", settings)
+
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = settings
+
+    first_response = client.post(
+        "/prompt",
+        json={"prompt": "What projects has Alex built?"},
+        headers={"X-Forwarded-For": "203.0.113.1"},
+    )
+    second_response = client.post(
+        "/prompt",
+        json={"prompt": "What projects has Alex built?"},
+        headers={"X-Forwarded-For": "203.0.113.2"},
+    )
+
+    assert first_response.status_code == 200
+    _assert_error(second_response, status=429, code="RATE_LIMIT_EXCEEDED", message="Rate limit exceeded.")
+
+
+def test_prompt_rate_limit_can_trust_forwarded_for_when_configured(monkeypatch):
+    async def fake_run_prompt(request, settings, *, request_id=None):
+        return PromptResponse(
+            answer="answer",
+            session_id=request.session_id,
+            history=[{"user": request.prompt, "assistant": "answer"}],
+            is_relevant=True,
+            intent="projects",
+            route="portfolio_query",
+            retrieval_sources=["projects"],
+            retrieval_reason="Project questions need project data.",
+            retrieval_errors=[],
+            rewritten_query=request.prompt,
+            node_trace=["ingest_user_message", "generate_answer"],
+        )
+
+    settings = lambda: _build_test_settings(PROMPT_RATE_LIMIT="1/minute", TRUST_PROXY_HEADERS=True)
+    monkeypatch.setattr(prompt_api, "run_prompt", fake_run_prompt)
+    monkeypatch.setattr(app_main, "require_settings", settings)
+
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = settings
+
+    first_response = client.post(
+        "/prompt",
+        json={"prompt": "What projects has Alex built?"},
+        headers={"X-Forwarded-For": "203.0.113.1"},
+    )
+    second_response = client.post(
+        "/prompt",
+        json={"prompt": "What projects has Alex built?"},
+        headers={"X-Forwarded-For": "203.0.113.2"},
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
 
 
 def test_prompt_stream_emits_upstream_error_event(monkeypatch):

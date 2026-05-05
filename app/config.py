@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     auth_session_rate_limit: str = Field(default="3/minute", validation_alias="AUTH_SESSION_RATE_LIMIT")
     auth_token_rate_limit: str = Field(default="10/minute", validation_alias="AUTH_TOKEN_RATE_LIMIT")
     max_active_streams_per_client: int = Field(default=2, validation_alias="MAX_ACTIVE_STREAMS_PER_CLIENT")
+    trust_proxy_headers: bool = Field(default=False, validation_alias="TRUST_PROXY_HEADERS")
 
     require_auth: bool = Field(default=False, validation_alias="REQUIRE_AUTH")
     auth_signing_secret: str | None = Field(default=None, validation_alias="AUTH_SIGNING_SECRET")

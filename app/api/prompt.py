@@ -40,7 +40,7 @@ async def prompt(
 ) -> PromptResponse | JSONResponse:
     request_id = _new_request_id()
     started_at = perf_counter()
-    client_key = client_key_from_request(request)
+    client_key = client_key_from_request(request, trust_proxy_headers=settings.trust_proxy_headers)
     if not rate_limit_guard.hit_prompt(client_key):
         logger.warning(
             "prompt request rejected | request_id=%s | status=429 | client=%s | reason=rate_limit",
@@ -93,7 +93,7 @@ async def prompt_stream(
 ) -> StreamingResponse | JSONResponse:
     request_id = _new_request_id()
     started_at = perf_counter()
-    client_key = client_key_from_request(request)
+    client_key = client_key_from_request(request, trust_proxy_headers=settings.trust_proxy_headers)
     if not rate_limit_guard.hit_prompt_stream(client_key):
         logger.warning(
             "prompt stream rejected | request_id=%s | status=429 | client=%s | reason=rate_limit",

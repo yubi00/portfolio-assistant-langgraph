@@ -41,6 +41,11 @@ def create_app() -> FastAPI:
         return _create_configuration_error_app(str(exc))
 
     configure_logging(settings.log_level, use_color=settings.log_color, log_format=settings.log_format)
+    production_config_error = _production_configuration_error(settings)
+    if production_config_error:
+        logger.error(production_config_error)
+        return _create_configuration_error_app(production_config_error)
+
     try:
         configure_rate_limiter(
             enabled=settings.rate_limit_enabled,
@@ -140,6 +145,16 @@ def _http_error_message(exc: HTTPException) -> str:
 
 def _is_production(app_env: str) -> bool:
     return app_env.strip().lower() == "production"
+
+
+def _production_configuration_error(settings) -> str | None:
+    if not _is_production(settings.app_env):
+        return None
+    if not settings.require_auth:
+        return "Invalid production configuration. REQUIRE_AUTH must be true when APP_ENV=production."
+    if settings.turnstile_bypass:
+        return "Invalid production configuration. TURNSTILE_BYPASS must be false when APP_ENV=production."
+    return None
 
 
 def _create_configuration_error_app(message: str) -> FastAPI:
