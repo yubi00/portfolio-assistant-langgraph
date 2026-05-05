@@ -474,7 +474,7 @@ This gives the vector store meaningful retrieval units such as:
 
 - `## Profile`
 - `## Core Skills`
-- `### MCP Terminal Portfolio - yubi.sh`
+- `### AI Terminal Portfolio - yubi.sh`
 - `### Senior Backend Developer - FifthDomain`
 - `## Education`
 - `## Certifications`

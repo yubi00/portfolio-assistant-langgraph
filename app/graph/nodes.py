@@ -164,12 +164,7 @@ class PortfolioGraphNodes:
     @log_node(NodeName.MERGE_NORMALIZE_CONTEXT)
     async def merge_normalize_context(self, state: PortfolioState) -> dict:
         sections = []
-        for label, key in (
-            ("projects", "project_context"),
-            ("resume", "resume_context"),
-            ("docs", "docs_context"),
-            ("inline_context", "portfolio_context"),
-        ):
+        for label, key in _ordered_context_sections(state):
             content = state.get(key, "").strip()
             if content:
                 sections.append(f"[{label}]\n{content}")
@@ -278,6 +273,26 @@ def _result_update(result: RetrievalResult, context_key: str, node_name: NodeNam
     if result.error:
         update["retrieval_errors"] = [result.error]
     return update
+
+
+def _ordered_context_sections(state: PortfolioState) -> list[tuple[str, str]]:
+    source_sections = {
+        RetrievalSource.PROJECTS.value: ("projects", "project_context"),
+        RetrievalSource.RESUME.value: ("resume", "resume_context"),
+        RetrievalSource.DOCS.value: ("docs", "docs_context"),
+    }
+
+    ordered_sections = [
+        source_sections[source]
+        for source in state.get("retrieval_sources", [])
+        if source in source_sections
+    ]
+    seen = {key for _, key in ordered_sections}
+    for section in source_sections.values():
+        if section[1] not in seen:
+            ordered_sections.append(section)
+    ordered_sections.append(("inline_context", "portfolio_context"))
+    return ordered_sections
 
 
 def _llm_usage_update(assistant_service: AssistantService, node_name: NodeName, operation: str) -> dict:

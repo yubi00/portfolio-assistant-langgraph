@@ -279,6 +279,7 @@ async def test_skill_query_can_plan_multiple_sources():
     assert result["retrieval_reason"] == "Skills questions need resume facts and project evidence."
     assert result["project_context"] == "Project data"
     assert result["resume_context"] == "Resume data"
+    assert result["merged_context"].startswith("[resume]\nResume data\n\n[projects]\nProject data")
     assert result["node_trace"][:4] == [
         "ingest_user_message",
         "resolve_context",
