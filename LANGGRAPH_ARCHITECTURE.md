@@ -579,7 +579,9 @@ Current behavior:
 - CLI keeps one in-process conversation history while the process is running
 - API accepts an optional `session_id`
 - if `session_id` is omitted, `/prompt` creates a new session
+- a new API session may be seeded with client-supplied `history`
 - if `session_id` is present and active, `/prompt` loads stored history and passes it into the graph
+- client-supplied `history` is ignored when an existing `session_id` is supplied
 - the graph appends the current turn in `save_memory`
 - the API persists the graph-returned history back into the session store
 - if `session_id` is missing or expired, `/prompt` returns a `404` session error
@@ -954,7 +956,9 @@ Current request shape:
 Current behavior:
 
 - if `session_id` is omitted, the API creates a new session and returns its id
+- optional client `history` seeds a new session when no `session_id` is supplied
 - if `session_id` is present and active, the API reuses stored history for that session
+- if both `session_id` and `history` are supplied, the stored session history is authoritative and client `history` is ignored
 - if `session_id` is present but missing or expired, the API returns a client-visible `404` session error rather than silently creating a different conversation
 
 Current response shape:
@@ -1004,3 +1008,19 @@ After confirming the configured API key worked, the same `gpt-4.1-mini` model an
 | Projects; Bite 2 first | 4 | 3 | 4.06 s → 3.00 s | 5.42 s → 4.36 s |
 
 All six requests completed successfully. Each matched pair returned the same route, intent, and retrieval sources: `projects` for the project question and `projects` plus `resume` for the fit question. The median paired reduction was 1.89 seconds to first answer chunk and 1.71 seconds to completion. These are observed results from a small local sample, not a guaranteed latency reduction; provider variation, answer length, and suggestion generation still affect totals. The comparison verifies the removed model call with live OpenAI, but broader routing accuracy and real GitHub/Neon paths still need separate evaluation.
+
+### Bite 3: Session History Contract (2026-10-01)
+
+Before this fix, `_prepare_effective_request` concatenated stored session turns with `request.history`. FastAPI had already parsed client history into `ConversationTurn` models, but the code then attempted `ConversationTurn(**turn)` on each model. A non-empty client `history` therefore raised `TypeError` and returned HTTP 500 before LangGraph or OpenAI ran. If that conversion had succeeded, an existing session would also have repeated any turns the client sent back.
+
+The API now chooses one history source. For an existing `session_id`, it uses only the server-stored turns. For a request without `session_id`, it creates a session and passes the client-supplied turns through as the initial history. Both `/prompt` and `/prompt/stream` share this preparation step; the CLI's own history flow is unchanged. Missing or expired session IDs continue to return 404.
+
+The live comparison used the pre-change Bite 2 commit (`4f172ef`) and the updated branch through a localhost Uvicorn `/prompt/stream` endpoint. Both used the configured `gpt-4.1-mini` key, the same seeded prior turn, and fixed retrieval facts:
+
+| Follow-up request | Before | After | Context-resolution input tokens |
+| --- | --- | --- | ---: |
+| Existing `session_id` plus repeated client `history` | HTTP 500; no model call | HTTP 200; one prior turn; completed SSE | 179 after |
+| New session with client `history` | HTTP 500; no model call | HTTP 200; one prior turn; completed SSE | 179 after |
+| Existing `session_id` without client `history` | HTTP 200; one prior turn | HTTP 200; one prior turn | 179 before and after |
+
+The repaired repeated-history follow-up reached its first answer chunk in 5.39 seconds; the repaired new-session request did so in 5.12 seconds. The failing requests have no comparable answer latency, so this bite is a correctness fix with avoided duplicate context rather than a measured speedup. Real GitHub/Neon latency was excluded. Concurrent requests using the same session can still race when writing their completed turns; that requires a separate small bite.

@@ -122,6 +122,8 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/prompt `
 
 API session memory is now available through `session_id`. Omit it on the first request, then reuse the returned `session_id` on follow-up requests.
 
+You may provide `history` when starting a new session. Once you send a `session_id`, the API uses the history stored for that session and ignores any client-supplied `history`. This applies to both `/prompt` and `/prompt/stream` and prevents the same turns from being added twice.
+
 The current memory model is a bounded app-level session store. LangGraph checkpointers were evaluated and intentionally deferred because this repo currently only needs short-term conversational memory, not durable thread persistence.
 
 Long-term visitor memory is intentionally deferred until there is a clear product workflow, authenticated identity, consent, and deletion behavior. Owner-controlled facts should be represented through explicit portfolio metadata instead.

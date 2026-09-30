@@ -152,12 +152,15 @@ def _prepare_effective_request(
 ) -> tuple[InMemorySessionStore, str, PromptRequest]:
     session_store: InMemorySessionStore = http_request.app.state.session_store
     session_id = request.session_id or session_store.create_session()
-    stored_history = session_store.get_history(session_id)
-    merged_history = [*stored_history, *request.history]
+    history = (
+        [ConversationTurn(**turn) for turn in session_store.get_history(session_id)]
+        if request.session_id
+        else request.history
+    )
     effective_request = request.model_copy(
         update={
             "session_id": session_id,
-            "history": [ConversationTurn(**turn) for turn in merged_history],
+            "history": history,
         }
     )
     return session_store, session_id, effective_request
