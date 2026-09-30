@@ -960,3 +960,25 @@ Current response shape:
 - `session_id` is always returned so clients can continue the same conversation explicitly
 
 The current implementation uses a simple app-level session store. LangGraph checkpointers were evaluated and intentionally deferred because this repo currently needs only bounded short-term conversation memory.
+
+---
+
+## Backend Optimization Baseline (2026-09-30)
+
+The current relevant path runs relevance classification, retrieval planning, answer generation, and, when eligible, suggestion generation as four serial chat-model calls. A context-dependent follow-up can add a context-resolution call before classification. Resume vector retrieval also makes an embedding request when selected. An off-topic standalone query makes one classification call; an obvious blocked query normally makes none.
+
+The existing graph tests establish these representative routing contracts with stubbed services:
+
+| Query type | Expected route / intent | Expected sources | Contract test |
+| --- | --- | --- | --- |
+| Project question | `portfolio_query` / `projects` | `projects` | `test_relevant_query_routes_to_generate_answer` |
+| Profile question | `portfolio_query` / `profile` | `resume` | `test_identity_query_routes_through_resume_retrieval` |
+| Skills question | `portfolio_query`; intent is not asserted | `resume`, `projects` | `test_skill_query_can_plan_multiple_sources` |
+| General off-topic question | `off_topic` / `off_topic` | none | `test_irrelevant_query_routes_to_friendly_response` |
+| User coding request | `off_topic` / `user_task` | none | `test_user_project_help_routes_to_friendly_response` |
+| Ambiguous project follow-up | `portfolio_query` / `projects` | none; clarification returned | `test_ambiguous_project_reference_returns_clarification` |
+| Prompt extraction request | `off_topic` / `policy_violation` | none; classification skipped | `test_policy_guard_blocks_prompt_extraction_before_classification` |
+
+A local HTTP smoke check called the real `POST /prompt/stream` route through Uvicorn with stubbed model and retrieval services. Both the project and off-topic cases returned `session_started`, progress events, an `answer_chunk`, and `answer_completed`. On this machine, the project case reached its first answer chunk in 148.3 ms and completed in 148.9 ms; the off-topic case reached its first answer chunk in 59.5 ms and completed in 60.0 ms. Individual stubbed graph nodes logged roughly 0.4–0.8 ms. These are transport and orchestration observations, not estimates of OpenAI, GitHub, or Neon latency. Live provider timing and real-model routing accuracy remain unmeasured while API credits are unavailable.
+
+Optimization gate: preserve the route, intent, selected sources, clarification behavior, response fields, and SSE event contract while reducing the two serial classification and retrieval-planning model calls to one decision. Compare call count first, then measure provider latency and routing quality when live calls are available.
