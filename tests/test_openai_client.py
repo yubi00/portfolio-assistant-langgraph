@@ -137,8 +137,11 @@ async def test_generate_answer_records_token_usage():
 
 
 @pytest.mark.asyncio
-async def test_classify_relevance_records_structured_token_usage():
+async def test_classify_and_plan_records_one_structured_call_and_token_usage():
+    calls = []
+
     async def fake_ainvoke(_messages):
+        calls.append(_messages)
         return {
             "raw": SimpleNamespace(
                 usage_metadata={
@@ -147,10 +150,11 @@ async def test_classify_relevance_records_structured_token_usage():
                     "total_tokens": 10,
                 }
             ),
-            "parsed": openai_client_module.RelevanceDecision(
+            "parsed": openai_client_module.RoutingDecision(
                 route="portfolio_query",
-                is_relevant=True,
                 intent="projects",
+                sources=["projects"],
+                reason="Project questions need project data.",
             ),
             "parsing_error": None,
         }
@@ -160,14 +164,32 @@ async def test_classify_relevance_records_structured_token_usage():
         with_structured_output=lambda _model, include_raw=False: SimpleNamespace(ainvoke=fake_ainvoke)
     )
 
-    decision = await client.classify_relevance("What projects?", "Alex")
+    decision = await client.classify_and_plan("What projects?", "Alex")
 
+    assert len(calls) == 1
     assert decision.intent == "projects"
-    assert client.consume_token_usage("relevance_classification") == {
+    assert decision.sources == ["projects"]
+    assert decision.reason == "Project questions need project data."
+    assert client.consume_token_usage("routing_decision") == {
         "input_tokens": 8,
         "output_tokens": 2,
         "total_tokens": 10,
     }
+    assert client.consume_token_usage("retrieval_planning") is None
+
+
+@pytest.mark.asyncio
+async def test_classify_and_plan_rejects_invalid_structured_output():
+    async def fake_ainvoke(_messages):
+        return {"raw": None, "parsed": None, "parsing_error": "missing sources"}
+
+    client = OpenAIAssistantClient(_test_settings())
+    client._chat = SimpleNamespace(
+        with_structured_output=lambda _model, include_raw=False: SimpleNamespace(ainvoke=fake_ainvoke)
+    )
+
+    with pytest.raises(UpstreamServiceError, match="invalid routing decision"):
+        await client.classify_and_plan("What projects?", "Alex")
 
 
 @pytest.mark.asyncio

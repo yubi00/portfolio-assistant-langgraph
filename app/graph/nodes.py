@@ -2,7 +2,7 @@ import logging
 import re
 
 from app.config import Settings
-from app.graph.constants import NodeName, RetrievalSource
+from app.graph.constants import NodeName, RetrievalSource, RouteName
 from app.graph.observability import log_node, skipped_update
 from app.graph.state import PortfolioState
 from app.services.assistant import AssistantService
@@ -77,21 +77,25 @@ class PortfolioGraphNodes:
 
     @log_node(NodeName.CLASSIFY_RELEVANCE)
     async def classify_relevance(self, state: PortfolioState) -> dict:
-        decision = await self._assistant_service.classify_relevance(
+        decision = await self._assistant_service.classify_and_plan(
             query=state["rewritten_query"],
             assistant_subject=state.get("assistant_subject", "the portfolio owner"),
         )
-        return {
-            "is_relevant": decision.is_relevant,
+        update = {
+            "is_relevant": decision.route == RouteName.PORTFOLIO_QUERY,
             "intent": decision.intent,
-            "route": decision.route,
+            "route": decision.route.value,
             "node_trace": [NodeName.CLASSIFY_RELEVANCE],
             **_llm_usage_update(
                 self._assistant_service,
                 NodeName.CLASSIFY_RELEVANCE,
-                "relevance_classification",
+                "routing_decision",
             ),
         }
+        if decision.route == RouteName.PORTFOLIO_QUERY:
+            update["planned_retrieval_sources"] = [source.value for source in decision.sources]
+            update["planned_retrieval_reason"] = decision.reason
+        return update
 
     @log_node(NodeName.CHECK_AMBIGUITY)
     async def check_ambiguity(self, state: PortfolioState) -> dict:
@@ -118,20 +122,10 @@ class PortfolioGraphNodes:
 
     @log_node(NodeName.PLAN_RETRIEVAL)
     async def plan_retrieval(self, state: PortfolioState) -> dict:
-        plan = await self._assistant_service.plan_retrieval(
-            query=state["rewritten_query"],
-            assistant_subject=state.get("assistant_subject", "the portfolio owner"),
-            intent=state.get("intent"),
-        )
         return {
-            "retrieval_sources": [source.value for source in plan.sources],
-            "retrieval_reason": plan.reason,
+            "retrieval_sources": state.get("planned_retrieval_sources", []),
+            "retrieval_reason": state.get("planned_retrieval_reason", ""),
             "node_trace": [NodeName.PLAN_RETRIEVAL],
-            **_llm_usage_update(
-                self._assistant_service,
-                NodeName.PLAN_RETRIEVAL,
-                "retrieval_planning",
-            ),
         }
 
     @log_node(NodeName.RETRIEVE_PROJECTS)

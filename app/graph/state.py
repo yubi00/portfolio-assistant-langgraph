@@ -38,6 +38,8 @@ class PortfolioState(TypedDict):
     is_relevant: NotRequired[bool]
     intent: NotRequired[str]
     route: NotRequired[str]
+    planned_retrieval_sources: NotRequired[list[str]]
+    planned_retrieval_reason: NotRequired[str]
     retrieval_sources: NotRequired[list[str]]
     retrieval_reason: NotRequired[str]
     project_context: NotRequired[str]

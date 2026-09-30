@@ -10,7 +10,7 @@ This implementation's architecture and decision log live in `LANGGRAPH_ARCHITECT
 - history-aware contextual follow-up handling
 - deterministic policy guard for prompt injection, prompt extraction, unsafe fabrication, secrets, and harmful-content requests
 - clarification guard rail for genuinely ambiguous follow-up references
-- explicit retrieval planning before answer generation
+- one structured routing decision chooses relevance and retrieval sources before answer generation
 - targeted GitHub project deep dives when a query names a specific repository
 - multi-source context merge with bounded context size
 - structured suggested follow-up prompts for richer portfolio conversations

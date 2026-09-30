@@ -1,7 +1,7 @@
 from app.config import Settings
 from app.graph.builder import build_portfolio_graph
 from app.graph.constants import RetrievalSource, RouteName
-from app.services.assistant import RelevanceDecision, RetrievalPlan, SuggestedPrompts
+from app.services.assistant import RoutingDecision, SuggestedPrompts
 from app.services.retrieval import RetrievalResult
 import logging
 
@@ -24,17 +24,32 @@ class FakeAssistantService:
             .replace("this project", "the matchcast project")
         )
 
-    async def classify_relevance(self, query, assistant_subject):
+    async def classify_and_plan(self, query, assistant_subject):
         normalized_query = query.lower()
         if "who are you" in normalized_query:
-            return RelevanceDecision(route=RouteName.PORTFOLIO_QUERY, is_relevant=True, intent="profile")
+            return RoutingDecision(
+                route=RouteName.PORTFOLIO_QUERY,
+                intent="profile",
+                sources=[RetrievalSource.RESUME],
+                reason="Profile questions should use resume grounding.",
+            )
         if "fix bug" in normalized_query:
-            return RelevanceDecision(route=RouteName.OFF_TOPIC, is_relevant=False, intent="user_task")
+            return RoutingDecision(route=RouteName.OFF_TOPIC, intent="user_task", sources=[], reason="")
         is_relevant = "project" in normalized_query or "skill" in normalized_query
-        return RelevanceDecision(
-            route=RouteName.PORTFOLIO_QUERY if is_relevant else RouteName.OFF_TOPIC,
-            is_relevant=is_relevant,
-            intent="projects" if is_relevant else "off_topic",
+        if not is_relevant:
+            return RoutingDecision(route=RouteName.OFF_TOPIC, intent="off_topic", sources=[], reason="")
+        if "skill" in normalized_query:
+            return RoutingDecision(
+                route=RouteName.PORTFOLIO_QUERY,
+                intent="projects",
+                sources=[RetrievalSource.RESUME, RetrievalSource.PROJECTS],
+                reason="Skills questions need resume facts and project evidence.",
+            )
+        return RoutingDecision(
+            route=RouteName.PORTFOLIO_QUERY,
+            intent="projects",
+            sources=[RetrievalSource.PROJECTS],
+            reason="Project questions need project data.",
         )
 
     async def generate_answer(self, query, assistant_subject, portfolio_context):
@@ -44,23 +59,6 @@ class FakeAssistantService:
         if intent in {"projects", "profile"}:
             return SuggestedPrompts(prompts=[f"Ask about {assistant_subject}'s architecture"])
         return SuggestedPrompts(prompts=[])
-
-    async def plan_retrieval(self, query, assistant_subject, intent=None):
-        normalized_query = query.lower()
-        if "who are you" in normalized_query:
-            return RetrievalPlan(
-                sources=[RetrievalSource.RESUME],
-                reason="Profile questions should use resume grounding.",
-            )
-        if "skill" in normalized_query:
-            return RetrievalPlan(
-                sources=[RetrievalSource.RESUME, RetrievalSource.PROJECTS],
-                reason="Skills questions need resume facts and project evidence.",
-            )
-        return RetrievalPlan(
-            sources=[RetrievalSource.PROJECTS],
-            reason="Project questions need project data.",
-        )
 
     def build_friendly_response(self, assistant_subject, intent=None):
         if intent == "policy_violation":

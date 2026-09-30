@@ -96,7 +96,7 @@ The harness is the set of contracts, boundaries, deterministic checks, retrieval
 | State contract | `PortfolioState` | Carry query, rewritten query, policy status, route, intent, retrieval plan, retrieved context, answer, memory, and trace |
 | Orchestration runtime | LangGraph `StateGraph` | Execute nodes, conditional routes, retrieval fan-out, merge, and memory save in an inspectable order |
 | Prompt contracts | `app/prompts/*.md` | Keep each LLM call focused on one decision instead of asking one giant prompt to do everything |
-| Structured LLM outputs | `RelevanceDecision`, `RetrievalPlan` | Convert LLM decisions into typed route/source data that the graph can safely branch on |
+| Structured LLM outputs | `RoutingDecision` | Return the route, intent, and source plan in one typed model response |
 | Deterministic guard rails | `policy_guard`, `check_ambiguity`, context bounds | Keep cheap, testable logic outside the LLM when the behavior does not require generation |
 | Retrieval layer | `ConfiguredPortfolioRetrievalService`, GitHub, README enrichment, featured metadata, resume pgvector, docs | Provide grounded evidence instead of asking the model to rely on memory or inference |
 | Memory/session layer | API session store, bounded `messages`, `save_memory` | Support follow-up questions without unbounded context growth |
@@ -110,9 +110,9 @@ This harness splits those responsibilities into smaller units:
 
 - `resolve_context` turns follow-up questions into standalone questions when history is available.
 - `policy_guard` blocks obvious unsafe prompt patterns before classification or retrieval.
-- `classify_relevance` decides whether the request belongs to the portfolio domain.
+- `classify_relevance` makes one structured call for the route, intent, and proposed sources.
 - `check_ambiguity` asks for clarification when a follow-up reference cannot be safely resolved.
-- `plan_retrieval` selects the smallest useful source set.
+- `plan_retrieval` publishes the proposed sources only after ambiguity checking passes.
 - retrieval nodes fetch evidence only from planned sources.
 - `merge_normalize_context` bounds and labels evidence.
 - `generate_answer` answers only from the merged context.
@@ -122,7 +122,7 @@ Decision: keep the system as a bounded agentic assistant with a simple, explicit
 
 Problem solved: portfolio Q&A needs reliable grounding, follow-up handling, public-safety boundaries, and traceability more than it needs open-ended tool use or recursive planning.
 
-Trade-off: this design uses multiple small steps, so relevant requests can require more than one LLM call. The benefit is that each decision is inspectable, testable, and replaceable. If latency becomes a real issue, context resolution, classification, and retrieval planning can be optimized or selectively combined without changing the whole architecture.
+Trade-off: this design uses multiple graph steps, but relevance classification and source planning now share one structured LLM call. The graph keeps separate ambiguity and planning milestones so routing remains inspectable and clarification responses do not expose unused retrieval sources.
 
 ### LangGraph's Role
 
@@ -278,6 +278,8 @@ flowchart TD
     Save --> END([END])
 ```
 
+`classify_relevance` calls the model once for `RoutingDecision` and holds the proposed sources in internal state. `plan_retrieval` copies that plan into response-visible state only for clear portfolio queries. It makes no model call. The existing node trace and SSE progress milestones remain in the same order.
+
 ### Route Categories
 
 | Route | Meaning | Destination |
@@ -319,7 +321,7 @@ Decision: keep source planning separate from source execution.
 
 Problem solved: the graph now makes information needs explicit before retrieval exists. Phase 3 can add retrieval nodes without changing classification or answer-generation policy.
 
-Trade-off: Phase 2 adds an extra LLM call for relevant queries before retrieval execution. This is acceptable for inspection and correctness; later we can optimize or combine calls if latency becomes a problem.
+The original Phase 2 planner added a separate LLM call. Backend optimization Bite 2 combines that decision with relevance classification, retaining the planning node as a deterministic publication step after ambiguity checking.
 
 ### Retrieval Execution
 
@@ -716,7 +718,7 @@ Decision: add a `plan_retrieval` node that chooses source categories for portfol
 
 Problem solved: information needs become explicit and testable before source-specific retrieval nodes exist.
 
-Trade-off: relevant queries now make an additional LLM call. This may be optimized later with caching, heuristic fallbacks, or combined classification/planning if needed.
+Historical trade-off: the initial planner added an LLM call. Backend optimization Bite 2 removed that call by combining source selection with relevance classification while keeping the planning node and response contract.
 
 ---
 
@@ -982,3 +984,11 @@ The existing graph tests establish these representative routing contracts with s
 A local HTTP smoke check called the real `POST /prompt/stream` route through Uvicorn with stubbed model and retrieval services. Both the project and off-topic cases returned `session_started`, progress events, an `answer_chunk`, and `answer_completed`. On this machine, the project case reached its first answer chunk in 148.3 ms and completed in 148.9 ms; the off-topic case reached its first answer chunk in 59.5 ms and completed in 60.0 ms. Individual stubbed graph nodes logged roughly 0.4–0.8 ms. These are transport and orchestration observations, not estimates of OpenAI, GitHub, or Neon latency. Live provider timing and real-model routing accuracy remain unmeasured while API credits are unavailable.
 
 Optimization gate: preserve the route, intent, selected sources, clarification behavior, response fields, and SSE event contract while reducing the two serial classification and retrieval-planning model calls to one decision. Compare call count first, then measure provider latency and routing quality when live calls are available.
+
+### Bite 2: Combined Routing Decision
+
+`RoutingDecision` now returns `route`, `intent`, `sources`, and `reason` in one structured model response. `is_relevant` is derived from `route`, so those fields cannot disagree. The model sees both the domain boundary examples and the available source definitions in `routing_decision.md`. Off-topic responses skip planning and retrieval. For relevant queries, the graph stores proposed sources internally until `check_ambiguity` has ruled out clarification, then `plan_retrieval` publishes them as `retrieval_sources` and `retrieval_reason` without another model request.
+
+An eligible standalone portfolio question now needs three serial chat-model calls: routing, answer, and suggestions. A context-dependent follow-up can need four. Resume vector retrieval can still add an embedding request. This removes one provider round trip from the relevant path, but real latency and routing-quality gains remain to be measured with available API credits. Stubbed HTTP timings are useful for checking the SSE contract, not for estimating the provider-time improvement.
+
+Verification on 2026-10-01: all 82 tests passed. A localhost Uvicorn smoke check called `POST /prompt/stream` for project, multi-source skills, off-topic, and user-task requests with stubbed model and retrieval services. All four returned the expected route and sources, kept `relevance_classified` progress, emitted `retrieval_planned` only for portfolio routes, and completed with the existing SSE event contract. The structured-client test confirms one routing invocation and token-usage event; invalid structured output becomes an upstream-service error. Live model accuracy and provider latency still need evaluation when API credits are available.
