@@ -583,7 +583,7 @@ Current behavior:
 - if `session_id` is present and active, `/prompt` loads stored history and passes it into the graph
 - client-supplied `history` is ignored when an existing `session_id` is supplied
 - the graph appends the current turn in `save_memory`
-- the API persists the graph-returned history back into the session store
+- the API appends each completed turn to the session store and returns the updated stored history
 - if `session_id` is missing or expired, `/prompt` returns a `404` session error
 
 Decision: keep the first persisted-memory implementation outside LangGraph checkpointers and use a simple app-level store with TTL and bounded turn history.
@@ -1023,4 +1023,24 @@ The live comparison used the pre-change Bite 2 commit (`4f172ef`) and the update
 | New session with client `history` | HTTP 500; no model call | HTTP 200; one prior turn; completed SSE | 179 after |
 | Existing `session_id` without client `history` | HTTP 200; one prior turn | HTTP 200; one prior turn | 179 before and after |
 
-The repaired repeated-history follow-up reached its first answer chunk in 5.39 seconds; the repaired new-session request did so in 5.12 seconds. The failing requests have no comparable answer latency, so this bite is a correctness fix with avoided duplicate context rather than a measured speedup. Real GitHub/Neon latency was excluded. Concurrent requests using the same session can still race when writing their completed turns; that requires a separate small bite.
+The repaired repeated-history follow-up reached its first answer chunk in 5.39 seconds; the repaired new-session request did so in 5.12 seconds. The failing requests have no comparable answer latency, so this bite is a correctness fix with avoided duplicate context rather than a measured speedup. Real GitHub/Neon latency was excluded. Concurrent session writes were handled separately in Bite 3a below.
+
+### Bite 3a: Concurrent Turns in One Session (2026-10-01)
+
+Before this fix, both API routes loaded a session snapshot before running the graph and replaced the entire stored history with their graph result on completion. Two overlapping requests could therefore each produce a valid answer but the later write would erase the earlier completed turn.
+
+The API now seeds client-supplied history when creating a session, then appends only the current completed turn to the authoritative store. `/prompt` and `/prompt/stream` share this completion behavior and return the stored history after their own append. No per-session lock is held during LLM work, so both requests can run concurrently. Each answer uses the history snapshot available when its request started; it cannot incorporate another turn that is still in flight. Stored turn order follows completion order, not request arrival order. A failed or cancelled request does not append its incomplete turn; an SSE partial answer is still reported in the error event.
+
+Live verification compared the pre-change commit (`f3bffd1`) with this bite through a running localhost Uvicorn `/prompt/stream` endpoint. Each variant used the configured `gpt-4.1-mini` model, the same fixed retrieval facts and prior session turn, and a barrier at routing to ensure two requests had loaded the same history before either completed:
+
+| Observation | Before | Bite 3a |
+| --- | --- | --- |
+| Concurrent requests reaching routing | 2 | 2 |
+| HTTP/SSE result | Both HTTP 200 with `answer_completed` | Both HTTP 200 with `answer_completed` |
+| Stored turns after both finish | 2: prior + only one new turn | 3: prior + both new turns |
+| First answer chunks, request 1 / 2 | 3.47 s / 4.07 s | 2.17 s / 2.40 s |
+| Completions, request 1 / 2 | 4.72 s / 5.21 s | 3.61 s / 3.69 s |
+
+The timing differences come from one small live sample and provider variation; this bite makes no latency-improvement claim. Fixed retrieval excludes GitHub and Neon latency. Focused tests reproduce the former last-writer-wins failure on both JSON and SSE routes, verify both turns survive after the fix, and verify an SSE error does not save a partial turn. All 88 tests pass.
+
+This guarantee is limited to one process-local `InMemorySessionStore`. Separate app workers or replicas still have independent session stores; shared storage and cross-process coordination remain Bite 12's deployment decision.

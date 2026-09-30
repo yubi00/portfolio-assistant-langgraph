@@ -60,7 +60,7 @@ async def prompt(
             _shorten(payload.prompt),
         )
         response = await run_prompt(effective_request, settings, request_id=request_id)
-        session_store.set_history(session_id, [turn.model_dump() for turn in response.history])
+        response = _save_completed_turn(session_store, session_id, effective_request, response)
         logger.info(
             "prompt request completed | request_id=%s | session_id=%s | route=%s | intent=%s | duration_ms=%.1f",
             request_id,
@@ -157,6 +157,8 @@ def _prepare_effective_request(
         if request.session_id
         else request.history
     )
+    if not request.session_id and history:
+        session_store.set_history(session_id, [turn.model_dump() for turn in history])
     effective_request = request.model_copy(
         update={
             "session_id": session_id,
@@ -164,6 +166,21 @@ def _prepare_effective_request(
         }
     )
     return session_store, session_id, effective_request
+
+
+def _save_completed_turn(
+    session_store: InMemorySessionStore,
+    session_id: str,
+    request: PromptRequest,
+    response: PromptResponse,
+) -> PromptResponse:
+    user_query = request.prompt.strip()
+    final_answer = response.answer.strip()
+    if user_query and final_answer:
+        session_store.append_turn(session_id, user_query, final_answer)
+    return response.model_copy(
+        update={"history": [ConversationTurn(**turn) for turn in session_store.get_history(session_id)]}
+    )
 
 
 def _reject_api_context_overrides(request: PromptRequest) -> None:
@@ -213,7 +230,7 @@ async def _stream_prompt_response(
                     partial_answer_parts.append(buffered_chunk)
                     yield _format_sse_event("answer_chunk", {"session_id": session_id, "delta": buffered_chunk})
                 response = PromptResponse(**event["data"])
-                session_store.set_history(session_id, [turn.model_dump() for turn in response.history])
+                response = _save_completed_turn(session_store, session_id, request, response)
                 logger.info(
                     "prompt stream completed | request_id=%s | session_id=%s | route=%s | intent=%s | progress_events=%s | answer_chunks=%s | duration_ms=%.1f",
                     request_id,

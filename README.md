@@ -124,6 +124,8 @@ API session memory is now available through `session_id`. Omit it on the first r
 
 You may provide `history` when starting a new session. Once you send a `session_id`, the API uses the history stored for that session and ignores any client-supplied `history`. This applies to both `/prompt` and `/prompt/stream` and prevents the same turns from being added twice.
 
+Overlapping requests with the same `session_id` can run at the same time. Each answer sees the history available when its request starts; completed turns are saved in completion order so neither successful request overwrites the other. Sessions remain local to one server process.
+
 The current memory model is a bounded app-level session store. LangGraph checkpointers were evaluated and intentionally deferred because this repo currently only needs short-term conversational memory, not durable thread persistence.
 
 Long-term visitor memory is intentionally deferred until there is a clear product workflow, authenticated identity, consent, and deletion behavior. Owner-controlled facts should be represented through explicit portfolio metadata instead.
