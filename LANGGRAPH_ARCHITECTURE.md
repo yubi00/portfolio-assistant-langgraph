@@ -1044,3 +1044,11 @@ Live verification compared the pre-change commit (`f3bffd1`) with this bite thro
 The timing differences come from one small live sample and provider variation; this bite makes no latency-improvement claim. Fixed retrieval excludes GitHub and Neon latency. Focused tests reproduce the former last-writer-wins failure on both JSON and SSE routes, verify both turns survive after the fix, and verify an SSE error does not save a partial turn. All 88 tests pass.
 
 This guarantee is limited to one process-local `InMemorySessionStore`. Separate app workers or replicas still have independent session stores; shared storage and cross-process coordination remain Bite 12's deployment decision.
+
+### Structured-Output Serialization Warning Fix (2026-10-01)
+
+During LangGraph's `messages` streaming mode, LangChain implicitly streamed the routing and suggestion model calls even though their parsed results are only used after completion. The installed `langchain-openai`/OpenAI SDK path serialized a structured response chunk whose `parsed` field contained a Pydantic model but was typed as `None`, producing `PydanticSerializationUnexpectedValue` warnings. This was log noise, not an observed answer failure.
+
+Both `with_structured_output` calls now bind `stream=False` to their underlying chat model. Passing `stream=False` to the outer structured runnable did not work because its parallel wrapper did not forward that invocation keyword to the model. `generate_answer` remains streamed and continues to provide incremental SSE answer chunks. This changes neither the number of model calls nor the public response contract.
+
+Verification: the warning was reproduced as an exception inside `langchain_openai.chat_models.base._astream` during a live graph stream. With the fix, live off-topic routing and portfolio routing/answer/suggestions completed with serializer warnings treated as errors. A localhost Uvicorn `/prompt/stream` follow-up returned HTTP 200, `portfolio_query`, `resume` retrieval, and completed SSE without the warning. All 88 tests pass, including assertions that only the two structured calls disable streaming.

@@ -54,7 +54,7 @@ class OpenAIAssistantClient:
         return rewritten or query
 
     async def classify_and_plan(self, query: str, assistant_subject: str) -> RoutingDecision:
-        structured_model = self._chat.with_structured_output(RoutingDecision, include_raw=True)
+        structured_model = self._chat.with_structured_output(RoutingDecision, include_raw=True, stream=False)
         response = await self._invoke_with_error_context(
             "routing decision",
             lambda: structured_model.ainvoke(
@@ -90,7 +90,7 @@ class OpenAIAssistantClient:
         answer: str,
         intent: str | None = None,
     ) -> SuggestedPrompts:
-        structured_model = self._chat.with_structured_output(SuggestedPrompts, include_raw=True)
+        structured_model = self._chat.with_structured_output(SuggestedPrompts, include_raw=True, stream=False)
         response = await self._invoke_with_error_context(
             "suggestion generation",
             lambda: structured_model.ainvoke(
