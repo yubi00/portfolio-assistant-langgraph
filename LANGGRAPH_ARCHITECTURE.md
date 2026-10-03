@@ -1126,3 +1126,17 @@ The graph now checks raw user text immediately after ingest. Blocked requests go
 The matched live post-change request returned HTTP 200, completed SSE, `off_topic`/`policy_violation`, and made zero context-resolution calls; it reached its first answer in 420 ms. This is both a safety correction and a saved provider call, so the changed route is intentional. A separate live legitimate follow-up still used one context-resolution call, rewrote “this project” to MatchCast, selected `portfolio_query`/`projects`, completed SSE, and had no retrieval errors. Focused tests cover blocked raw follow-ups, unsafe rewritten follow-ups, and ordinary follow-ups; all 107 tests pass.
 
 Trade-off: the deterministic raw-text guard can block a query that an LLM might have sanitized during rewriting. This is intentional for explicit unsafe requests, but the existing narrow-pattern false-positive risk remains. The rewrite recheck is performed only when the text changes, since unchanged text already passed the raw guard.
+
+### Bite 9: Measure Suggestion Tail Latency (2026-10-03)
+
+For eligible portfolio answers, `generate_suggestions` runs after answer generation and before `save_memory` and SSE `answer_completed`. The answer streams earlier, but the completed event carries the three structured `suggested_prompts`. Two localhost Uvicorn `/prompt/stream` runs used live OpenAI with identical fixed project evidence to isolate this tail from GitHub and Neon variation:
+
+| Run | Last answer chunk | Answer node done | Suggestions done | `answer_completed` | Suggestions |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Live 1 | 3.30 s | 3.33 s | 4.50 s | 4.51 s | 3 |
+| Live 2 | 3.58 s | 3.61 s | 4.66 s | 4.67 s | 3 |
+| Experimental skip | 3.03 s | 3.06 s | 3.06 s | 3.06 s | 0 |
+
+The suggestion step accounted for about 1.18 and 1.06 seconds after answer-node completion in the two live runs. The skip run is a lower-bound latency comparison, not a quality-equivalent replacement. All three requests returned HTTP 200, `portfolio_query`/`projects`, completed SSE, and had no retrieval errors. The current frontend displays streamed chunks promptly but buffers the final word until `answer_completed`, so this tail can still be noticeable at the end of a response.
+
+Decision: keep the grounded model-generated suggestions and existing SSE contract. Removing the call would remove three useful prompts; a deterministic replacement has not been shown to match their relevance. Running the call before the answer would lose answer grounding. A frontend end-of-answer flush or an explicit opt-out could be considered separately if the measured tail becomes a UX priority, but neither is introduced in this backend bite. No runtime code or behavior changed; all 107 tests pass.
