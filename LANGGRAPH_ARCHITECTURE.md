@@ -1044,7 +1044,7 @@ Live verification compared the pre-change commit (`f3bffd1`) with this bite thro
 
 The timing differences come from one small live sample and provider variation; this bite makes no latency-improvement claim. Fixed retrieval excludes GitHub and Neon latency. Focused tests reproduce the former last-writer-wins failure on both JSON and SSE routes, verify both turns survive after the fix, and verify an SSE error does not save a partial turn. All 88 tests pass.
 
-This guarantee is limited to one process-local `InMemorySessionStore`. Separate app workers or replicas still have independent session stores; shared storage and cross-process coordination remain Bite 12's deployment decision.
+This guarantee is limited to one process-local `InMemorySessionStore`. Separate app workers or replicas still have independent session stores; Bite 12 below records the Vercel deployment decision and accepted risk.
 
 ### Structured-Output Serialization Warning Fix (2026-10-01)
 
@@ -1156,3 +1156,20 @@ The proposed “JEV” is TypeSafe AI's hosted [Jev System One model](https://ty
 The current OpenAI `RoutingDecision` returns `route`, an open-ended `intent`, an ordered list of `sources`, and a free-text `reason` in one structured call. Jev's bounded answers cannot generate that `reason`; an adapter would need a fixed intent taxonomy, deterministic source ordering and reason templates, and rules for conflicting or uncertain judgments. `intent` affects friendly off-topic responses and suggestion eligibility, so it cannot be dropped as mere telemetry. Any such mapping could change public response fields or behavior and must be tested explicitly. Jev's own [known limitations](https://docs.typesafe.ai/model-jaggedness/jev-1.13) include literal reading, option-order sensitivity, and adversarial user-controlled state; neither type safety nor low latency establishes routing accuracy.
 
 No `TYPESAFE_API_KEY` is configured, so no Jev call, accuracy comparison, or end-to-end latency claim has been made. Decision with the project owner: keep the current OpenAI router and defer Jev integration; the extra provider and contract-mapping work is not justified without measured quality and latency gains. This closes the present evaluation without claiming Jev is unsuitable in general. If revisited, run a local-only, side-by-side evaluation of labeled portfolio/off-topic/user-task/profile/multi-source/follow-up cases, including technology-name false positives and ambiguous queries. Compare route, intent, selected sources, confidence/fallback rate, API latency, and estimated cost before proposing a runtime swap. No runtime behavior changed.
+
+### Bite 12: Shared Runtime State Decision (Deferred, 2026-10-03)
+
+The backend is deployed to Vercel production, although development also uses one local Uvicorn process. The repository's Vercel entry point exports the same FastAPI app. [Vercel Functions](https://vercel.com/docs/functions) may reuse a warm instance, create other instances under load, and scale down when idle; a production deployment is not a guarantee of one durable Python process. The deployment screenshot showed production sourced from `main` at `0d7dade` when this review was made, so the backend-optimization branch was not yet deployed.
+
+Current process-local state has different consequences:
+
+| State | Across a function instance change | Priority if revisited |
+| --- | --- | --- |
+| `InMemorySessionStore` | A valid conversation `session_id` can return `404 SESSION_NOT_FOUND`; prior turns are lost on restart or cold start. | First: user-visible correctness |
+| `RateLimitGuard` using `MemoryStorage` | Request/auth limits apply per instance, not globally; effective protection can weaken with scale. | Next: cost and abuse protection |
+| `ActiveStreamRegistry` | The active-stream cap applies per instance, not across the deployment. | Next: concurrency protection |
+| GitHub repository/README cache | Each instance warms its own cache, increasing cold GitHub requests and latency. | Later: performance only |
+
+The auth refresh/access JWTs are signed and validated from shared configuration rather than this conversation store; their `sid` claim is not the API conversation `session_id`. The local 113-test suite and stubbed localhost `/prompt/stream` smoke passed during the review, confirming the existing single-process path but not cross-instance Vercel behavior. No live Vercel cross-instance failure or traffic-based benefit was measured.
+
+Decision: accept this risk temporarily at the current low-traffic stage and make no storage change in this planning bite. Revisit shared sessions first if a valid follow-up gets `SESSION_NOT_FOUND`, if conversation continuity across cold starts becomes a product requirement, or before relying on production follow-ups at scale. Revisit global rate and stream limits before treating them as hard deployment-wide cost/abuse caps. The cache may remain local unless cold-fetch volume warrants sharing. A future migration must preserve TTL, bounded history, atomic completed-turn appends, and the existing API/SSE contract; the backing store should be selected then, rather than adding infrastructure speculatively now.

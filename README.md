@@ -182,7 +182,7 @@ TURNSTILE_BYPASS=false
 
 Run `portfolio-index-resume` offline before expecting resume answers from pgvector in production. The API does not create embeddings during server startup.
 
-Deployment caveat: current rate limit, session, active-stream, and GitHub cache state are in process memory. That is acceptable for the current single-instance deployment path and smoke testing, but multi-instance/serverless scale should move shared state to external storage.
+Deployment caveat: the Vercel production app can run on separate function instances. Session history, rate limits, active-stream counts, and GitHub caches currently live only in each instance's memory. A later request may lose its session after an instance change or cold start; limits are not global, and caches may warm independently. Shared sessions and global limits are deferred while traffic is low, not guaranteed by this deployment. See the Bite 12 decision in `LANGGRAPH_ARCHITECTURE.md` before relying on durable follow-ups or global limits.
 
 ## CLI
 
