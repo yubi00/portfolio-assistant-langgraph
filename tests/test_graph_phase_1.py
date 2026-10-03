@@ -85,6 +85,11 @@ class FailingSuggestionAssistantService(FakeAssistantService):
         raise RuntimeError("suggestion failure")
 
 
+class GreetingFastPathAssistantService(FakeAssistantService):
+    async def classify_and_plan(self, query, assistant_subject):
+        raise AssertionError("simple greetings should not call the LLM classifier")
+
+
 async def test_relevant_query_routes_to_generate_answer():
     graph = build_portfolio_graph(FakeAssistantService(), FakeRetrievalService(), settings=_test_settings())
 
@@ -201,6 +206,51 @@ async def test_irrelevant_query_routes_to_friendly_response():
         "friendly_response",
         "save_memory",
     ]
+
+
+async def test_simple_greeting_skips_llm_classification_and_retrieval():
+    graph = build_portfolio_graph(
+        GreetingFastPathAssistantService(),
+        FakeRetrievalService(),
+        settings=_test_settings(),
+    )
+
+    result = await graph.ainvoke(
+        {
+            "user_query": "Hi Alex!",
+            "messages": [],
+            "assistant_subject": "Alex",
+        }
+    )
+
+    assert result["is_relevant"] is False
+    assert result["intent"] == "greeting"
+    assert result["route"] == "off_topic"
+    assert result.get("retrieval_sources") is None
+    assert result["node_trace"] == [
+        "ingest_user_message",
+        "policy_guard",
+        "resolve_context",
+        "classify_relevance",
+        "friendly_response",
+        "save_memory",
+    ]
+
+
+async def test_greeting_prefixed_portfolio_question_still_uses_retrieval():
+    graph = build_portfolio_graph(FakeAssistantService(), FakeRetrievalService(), settings=_test_settings())
+
+    result = await graph.ainvoke(
+        {
+            "user_query": "Hi Alex, what projects have you built?",
+            "messages": [],
+            "assistant_subject": "Alex",
+        }
+    )
+
+    assert result["route"] == "portfolio_query"
+    assert result["retrieval_sources"] == ["projects"]
+    assert "retrieve_projects" in result["node_trace"]
 
 
 async def test_identity_query_routes_through_resume_retrieval():

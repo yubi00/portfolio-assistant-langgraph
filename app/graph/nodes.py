@@ -78,6 +78,17 @@ class PortfolioGraphNodes:
 
     @log_node(NodeName.CLASSIFY_RELEVANCE)
     async def classify_relevance(self, state: PortfolioState) -> dict:
+        if _is_simple_greeting(
+            state["rewritten_query"],
+            state.get("assistant_subject", "the portfolio owner"),
+        ):
+            return {
+                "is_relevant": False,
+                "intent": "greeting",
+                "route": RouteName.OFF_TOPIC.value,
+                "node_trace": [NodeName.CLASSIFY_RELEVANCE],
+            }
+
         decision = await self._assistant_service.classify_and_plan(
             query=state["rewritten_query"],
             assistant_subject=state.get("assistant_subject", "the portfolio owner"),
@@ -354,10 +365,38 @@ SUGGESTION_INTENTS = {
 NO_SUGGESTION_INTENTS = {
     "education",
     "contact",
+    "greeting",
     "policy_violation",
     "user_task",
     "off_topic",
 }
+
+
+GREETING_OPENERS = {"hi", "hello", "hey", "hiya", "greetings"}
+GREETING_FILLERS = {
+    "there",
+    "good",
+    "morning",
+    "afternoon",
+    "evening",
+    "how",
+    "are",
+    "you",
+    "doing",
+    "today",
+    "it",
+    "going",
+}
+
+
+def _is_simple_greeting(query: str, assistant_subject: str) -> bool:
+    tokens = re.findall(r"[a-z0-9]+", query.casefold())
+    if not tokens or tokens[0] not in GREETING_OPENERS or len(tokens) > 8:
+        return False
+
+    subject_tokens = set(re.findall(r"[a-z0-9]+", assistant_subject.casefold()))
+    allowed_tokens = GREETING_OPENERS | GREETING_FILLERS | subject_tokens
+    return all(token in allowed_tokens for token in tokens)
 
 
 def _should_generate_suggestions(state: PortfolioState) -> bool:

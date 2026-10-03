@@ -107,6 +107,8 @@ class OpenAIAssistantClient:
         return SuggestedPrompts(prompts=_normalize_suggestions(parsed.prompts))
 
     def build_friendly_response(self, assistant_subject: str, intent: str | None = None) -> str:
+        if intent == "greeting":
+            return f"Hi! What would you like to know about {assistant_subject}'s work or projects?"
         if intent == "policy_violation":
             return (
                 "I can't help with requests to override instructions, reveal hidden prompts, "
