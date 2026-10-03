@@ -136,10 +136,11 @@ class ConfiguredPortfolioRetrievalService:
                     repos=selected_repos,
                     max_chars=self._settings.github_readme_max_chars,
                 )
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("GitHub project retrieval failed | reason=%s", exc, exc_info=True)
             return RetrievalResult(
                 source=RetrievalSource.PROJECTS,
-                error=f"GitHub project retrieval failed: {exc}",
+                error="GitHub project retrieval failed.",
             )
 
         return RetrievalResult(
@@ -263,8 +264,8 @@ class ConfiguredPortfolioRetrievalService:
                 limit=self._settings.resume_vector_top_k,
             )
         except Exception as exc:
-            logger.warning("resume vector retrieval failed | reason=%s", exc)
-            return RetrievalResult(source=RetrievalSource.RESUME, error=f"Resume vector retrieval failed: {exc}")
+            logger.warning("resume vector retrieval failed | reason=%s", exc, exc_info=True)
+            return RetrievalResult(source=RetrievalSource.RESUME, error="Resume vector retrieval failed.")
 
         logger.info(
             "resume vector retrieval complete | namespace=%s | chunks=%s",
@@ -286,14 +287,16 @@ def _read_text_source(source: RetrievalSource, configured_path: str | None, env_
 
     path = Path(configured_path)
     if not path.exists() or not path.is_file():
-        return RetrievalResult(source=source, error=f"{env_name} points to a missing file: {configured_path}")
+        logger.warning("%s points to a missing file | path=%s", env_name, configured_path)
+        return RetrievalResult(source=source, error=f"{env_name} points to a missing file.")
 
     try:
         if path.suffix.lower() == ".pdf":
             return RetrievalResult(source=source, content=_extract_pdf_text(path))
         return RetrievalResult(source=source, content=_normalize_text_content(path.read_text(encoding="utf-8")))
     except OSError as exc:
-        return RetrievalResult(source=source, error=f"Could not read {source.value} file: {exc}")
+        logger.warning("%s file read failed | path=%s | reason=%s", source.value, configured_path, exc, exc_info=True)
+        return RetrievalResult(source=source, error=f"Could not read {source.value} file.")
 
 
 def _load_default_resume_source() -> RetrievalResult:
@@ -389,7 +392,13 @@ async def _fetch_repository_readme(
         logger.debug("GitHub README retrieval skipped | repo=%s | reason=%s", repo, exc)
         return ""
 
-    payload = response.json()
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        logger.debug("GitHub README retrieval skipped | repo=%s | reason=%s", repo, exc)
+        return ""
+    if not isinstance(payload, dict):
+        return ""
     encoded_content = payload.get("content")
     if not isinstance(encoded_content, str):
         return ""

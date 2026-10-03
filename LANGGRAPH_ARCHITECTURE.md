@@ -741,11 +741,11 @@ Trade-off: follow-up turns make an extra LLM call. This is acceptable for correc
 
 Problem: one missing source, such as a missing resume file, should not fail the entire assistant response if other context is available.
 
-Decision: retrieval nodes return content or an error string. Errors are stored in `retrieval_errors`; context merging continues with successful sources.
+Decision: retrieval nodes return content or an error string. Errors are stored in `retrieval_errors`; context merging continues with successful sources. Public error strings must be stable and must not contain raw provider/database exception text or configured local paths; diagnostic details belong in server logs.
 
 Problem solved: partial data can still produce a grounded answer.
 
-Trade-off: answer quality depends on what was retrieved. The CLI/API debug fields expose skipped or failed sources so failures are inspectable.
+Trade-off: answer quality depends on what was retrieved. The CLI/API debug fields expose skipped or failed sources so failures are inspectable, while detailed diagnosis requires access to server logs.
 
 ---
 
@@ -1140,3 +1140,11 @@ For eligible portfolio answers, `generate_suggestions` runs after answer generat
 The suggestion step accounted for about 1.18 and 1.06 seconds after answer-node completion in the two live runs. The skip run is a lower-bound latency comparison, not a quality-equivalent replacement. All three requests returned HTTP 200, `portfolio_query`/`projects`, completed SSE, and had no retrieval errors. The current frontend displays streamed chunks promptly but buffers the final word until `answer_completed`, so this tail can still be noticeable at the end of a response.
 
 Decision: keep the grounded model-generated suggestions and existing SSE contract. Removing the call would remove three useful prompts; a deterministic replacement has not been shown to match their relevance. Running the call before the answer would lose answer grounding. A frontend end-of-answer flush or an explicit opt-out could be considered separately if the measured tail becomes a UX priority, but neither is introduced in this backend bite. No runtime code or behavior changed; all 107 tests pass.
+
+### Bite 10: Harden Retrieval Failures (2026-10-03)
+
+`RetrievalResult.error` reaches the API response and the SSE `answer_completed.retrieval_errors` field. Previously, GitHub HTTP errors, resume embedding/database exceptions, and local-file read errors appended raw exception text to that public field; a missing local file also exposed its configured path. Malformed GitHub repository JSON escaped retrieval as a graph failure, while malformed README JSON discarded otherwise usable repository metadata.
+
+GitHub and resume-vector failures now log exception details server-side and return fixed, source-specific public messages. Missing-file and read failures return path-free messages and log their diagnostics. Invalid repository JSON follows the same non-fatal GitHub failure path. A malformed individual README is skipped like other README failures, retaining the repository's metadata and other sources. Missing configuration and empty-index messages retain their existing behavior. Server logs may contain sensitive diagnostic detail and should remain access-controlled.
+
+Before the fix, four focused regression cases failed: embedding/database details, GitHub details, and a configured path appeared in public errors, and invalid GitHub JSON escaped the retrieval result. An additional README regression showed loss of project metadata. After the fix, all 113 tests pass. A localhost Uvicorn `/prompt/stream` probe with live OpenAI and injected fake GitHub, embedding, and database failures returned HTTP 200 and completed SSE for all three cases; `retrieval_errors` contained only `GitHub project retrieval failed.` or `Resume vector retrieval failed.`, and no fake detail appeared anywhere in the SSE stream. This is a reliability/privacy correction, not a latency optimization; the observed endpoint durations include variable model latency and are not used as a speed comparison.
