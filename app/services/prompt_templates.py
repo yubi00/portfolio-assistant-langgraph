@@ -23,9 +23,9 @@ def build_context_resolution_messages(query: str, history: list[ConversationTurn
     ]
 
 
-def build_relevance_messages(query: str, assistant_subject: str) -> list[tuple[str, str]]:
+def build_routing_messages(query: str, assistant_subject: str) -> list[tuple[str, str]]:
     return [
-        ("system", load_system_prompt("relevance_classification.md")),
+        ("system", load_system_prompt("routing_decision.md")),
         ("human", f"Portfolio subject: {assistant_subject}\n\nUser query: {query}"),
     ]
 
@@ -59,16 +59,5 @@ def build_suggestion_messages(
                 f"User query: {query}\n\n"
                 f"Assistant answer:\n{answer}"
             ),
-        ),
-    ]
-
-
-def build_retrieval_planning_messages(query: str, assistant_subject: str, intent: str | None) -> list[tuple[str, str]]:
-    intent_text = intent or "unknown"
-    return [
-        ("system", load_system_prompt("retrieval_planning.md")),
-        (
-            "human",
-            f"Portfolio subject: {assistant_subject}\nIntent: {intent_text}\n\nUser query: {query}",
         ),
     ]

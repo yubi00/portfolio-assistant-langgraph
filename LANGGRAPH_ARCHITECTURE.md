@@ -96,7 +96,7 @@ The harness is the set of contracts, boundaries, deterministic checks, retrieval
 | State contract | `PortfolioState` | Carry query, rewritten query, policy status, route, intent, retrieval plan, retrieved context, answer, memory, and trace |
 | Orchestration runtime | LangGraph `StateGraph` | Execute nodes, conditional routes, retrieval fan-out, merge, and memory save in an inspectable order |
 | Prompt contracts | `app/prompts/*.md` | Keep each LLM call focused on one decision instead of asking one giant prompt to do everything |
-| Structured LLM outputs | `RelevanceDecision`, `RetrievalPlan` | Convert LLM decisions into typed route/source data that the graph can safely branch on |
+| Structured LLM outputs | `RoutingDecision` | Return the route, intent, and source plan in one typed model response |
 | Deterministic guard rails | `policy_guard`, `check_ambiguity`, context bounds | Keep cheap, testable logic outside the LLM when the behavior does not require generation |
 | Retrieval layer | `ConfiguredPortfolioRetrievalService`, GitHub, README enrichment, featured metadata, resume pgvector, docs | Provide grounded evidence instead of asking the model to rely on memory or inference |
 | Memory/session layer | API session store, bounded `messages`, `save_memory` | Support follow-up questions without unbounded context growth |
@@ -108,11 +108,11 @@ A single-prompt assistant would have to classify relevance, resolve follow-ups, 
 
 This harness splits those responsibilities into smaller units:
 
-- `resolve_context` turns follow-up questions into standalone questions when history is available.
-- `policy_guard` blocks obvious unsafe prompt patterns before classification or retrieval.
-- `classify_relevance` decides whether the request belongs to the portfolio domain.
+- `policy_guard` blocks obvious unsafe user text before any model call.
+- `resolve_context` turns allowed follow-up questions into standalone questions when history is available, then checks changed rewrites for unsafe patterns.
+- `classify_relevance` makes one structured call for the route, intent, and proposed sources.
 - `check_ambiguity` asks for clarification when a follow-up reference cannot be safely resolved.
-- `plan_retrieval` selects the smallest useful source set.
+- `plan_retrieval` publishes the proposed sources only after ambiguity checking passes.
 - retrieval nodes fetch evidence only from planned sources.
 - `merge_normalize_context` bounds and labels evidence.
 - `generate_answer` answers only from the merged context.
@@ -122,7 +122,7 @@ Decision: keep the system as a bounded agentic assistant with a simple, explicit
 
 Problem solved: portfolio Q&A needs reliable grounding, follow-up handling, public-safety boundaries, and traceability more than it needs open-ended tool use or recursive planning.
 
-Trade-off: this design uses multiple small steps, so relevant requests can require more than one LLM call. The benefit is that each decision is inspectable, testable, and replaceable. If latency becomes a real issue, context resolution, classification, and retrieval planning can be optimized or selectively combined without changing the whole architecture.
+Trade-off: this design uses multiple graph steps, but relevance classification and source planning now share one structured LLM call. The graph keeps separate ambiguity and planning milestones so routing remains inspectable and clarification responses do not expose unused retrieval sources.
 
 ### LangGraph's Role
 
@@ -252,11 +252,11 @@ Trade-off: in-memory limits are process-local. They are fine for a single-instan
 ```mermaid
 flowchart TD
     START([START]) --> Ingest[ingest_user_message]
-    Ingest --> Resolve[resolve_context]
-    Resolve --> Policy[policy_guard]
-
-    Policy -->|allowed| Classify[classify_relevance]
+    Ingest --> Policy[policy_guard]
+    Policy -->|allowed| Resolve[resolve_context]
     Policy -->|blocked| Friendly[friendly_response]
+    Resolve -->|allowed| Classify[classify_relevance]
+    Resolve -->|blocked rewrite| Friendly
 
     Classify -->|portfolio_query| Ambiguity[check_ambiguity]
     Classify -->|off_topic| Friendly[friendly_response]
@@ -278,6 +278,8 @@ flowchart TD
     Save --> END([END])
 ```
 
+`classify_relevance` calls the model once for `RoutingDecision` and holds the proposed sources in internal state. `plan_retrieval` copies that plan into response-visible state only for clear portfolio queries. It makes no model call. The policy check now precedes context resolution in node traces and SSE progress; an initially blocked request skips context resolution entirely.
+
 ### Route Categories
 
 | Route | Meaning | Destination |
@@ -289,7 +291,7 @@ This route split exists because a boolean `is_relevant` flag was too coarse. Por
 
 ### Policy Guard
 
-The graph runs `policy_guard` after context resolution and before relevance classification.
+The graph runs `policy_guard` on the original user text immediately after ingest and before any model call. If context resolution changes an allowed query, its output is checked with the same deterministic patterns before relevance classification. A blocked original query skips context resolution; a blocked rewrite stops before classification.
 
 It is intentionally deterministic rather than another LLM call. The guard blocks obvious unsafe prompt patterns before they can influence source planning or retrieval:
 
@@ -319,7 +321,7 @@ Decision: keep source planning separate from source execution.
 
 Problem solved: the graph now makes information needs explicit before retrieval exists. Phase 3 can add retrieval nodes without changing classification or answer-generation policy.
 
-Trade-off: Phase 2 adds an extra LLM call for relevant queries before retrieval execution. This is acceptable for inspection and correctness; later we can optimize or combine calls if latency becomes a problem.
+The original Phase 2 planner added a separate LLM call. Backend optimization Bite 2 combines that decision with relevance classification, retaining the planning node as a deterministic publication step after ambiguity checking.
 
 ### Retrieval Execution
 
@@ -350,6 +352,7 @@ Project retrieval strategy:
 - If exact and normalized repo-name matching fail, deterministic fuzzy matching can still focus retrieval when one repository is a clear typo correction, such as `mathcast` -> `matchcast`.
 - Subjective project preference questions, such as "most proud of", "favorite", "flagship", or "most impressive", prioritize curated featured project metadata when available.
 - GitHub repository lists and README excerpts are cached in-process for a short TTL to reduce latency and avoid repeated GitHub calls for common portfolio questions.
+- Cold README cache misses are fetched with at most three concurrent GitHub requests; selected repository order still controls the formatted output.
 - Later: optionally pull GitHub pinned repositories through GraphQL and add scoring.
 
 Problem solved: "what projects has this person built?" should not treat forked repositories as owned work.
@@ -536,7 +539,7 @@ Trade-off: `TypedDict` does not validate data at runtime. We accept this for Pha
 
 ## Context Resolution
 
-`resolve_context` performs history-aware query contextualization. When prior conversation turns are present and the latest query looks context-dependent, it asks the LLM to rewrite the latest user message into a standalone portfolio question using a bounded recent-history window. If there is no history, or the latest query is already clearly standalone, it returns the query unchanged without spending an LLM call.
+`resolve_context` performs history-aware query contextualization after the raw-text policy check. When prior conversation turns are present and the latest query looks context-dependent, it asks the LLM to rewrite the latest user message into a standalone portfolio question using a bounded recent-history window. If there is no history, or the latest query is already clearly standalone, it returns the query unchanged without spending an LLM call. Changed rewrites receive the same policy check before routing continues.
 
 This follows the same design used by conversational RAG systems: rewrite the user question before classification and retrieval, instead of passing ambiguous follow-ups like "this project" or "the second one" directly into retrieval planning.
 
@@ -577,9 +580,11 @@ Current behavior:
 - CLI keeps one in-process conversation history while the process is running
 - API accepts an optional `session_id`
 - if `session_id` is omitted, `/prompt` creates a new session
+- a new API session may be seeded with client-supplied `history`
 - if `session_id` is present and active, `/prompt` loads stored history and passes it into the graph
+- client-supplied `history` is ignored when an existing `session_id` is supplied
 - the graph appends the current turn in `save_memory`
-- the API persists the graph-returned history back into the session store
+- the API appends each completed turn to the session store and returns the updated stored history
 - if `session_id` is missing or expired, `/prompt` returns a `404` session error
 
 Decision: keep the first persisted-memory implementation outside LangGraph checkpointers and use a simple app-level store with TTL and bounded turn history.
@@ -716,7 +721,7 @@ Decision: add a `plan_retrieval` node that chooses source categories for portfol
 
 Problem solved: information needs become explicit and testable before source-specific retrieval nodes exist.
 
-Trade-off: relevant queries now make an additional LLM call. This may be optimized later with caching, heuristic fallbacks, or combined classification/planning if needed.
+Historical trade-off: the initial planner added an LLM call. Backend optimization Bite 2 removed that call by combining source selection with relevance classification while keeping the planning node and response contract.
 
 ---
 
@@ -736,11 +741,11 @@ Trade-off: follow-up turns make an extra LLM call. This is acceptable for correc
 
 Problem: one missing source, such as a missing resume file, should not fail the entire assistant response if other context is available.
 
-Decision: retrieval nodes return content or an error string. Errors are stored in `retrieval_errors`; context merging continues with successful sources.
+Decision: retrieval nodes return content or an error string. Errors are stored in `retrieval_errors`; context merging continues with successful sources. Public error strings must be stable and must not contain raw provider/database exception text or configured local paths; diagnostic details belong in server logs.
 
 Problem solved: partial data can still produce a grounded answer.
 
-Trade-off: answer quality depends on what was retrieved. The CLI/API debug fields expose skipped or failed sources so failures are inspectable.
+Trade-off: answer quality depends on what was retrieved. The CLI/API debug fields expose skipped or failed sources so failures are inspectable, while detailed diagnosis requires access to server logs.
 
 ---
 
@@ -899,7 +904,7 @@ uv run portfolio-assistant "who are you" --show-trace
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> policy_guard -> classify_relevance -> check_ambiguity -> plan_retrieval -> retrieve_resume -> merge_normalize_context -> generate_answer -> generate_suggestions -> save_memory
+ingest_user_message -> policy_guard -> resolve_context -> classify_relevance -> check_ambiguity -> plan_retrieval -> retrieve_resume -> merge_normalize_context -> generate_answer -> generate_suggestions -> save_memory
 ```
 
 User-task redirect:
@@ -911,7 +916,7 @@ uv run portfolio-assistant "can you help me fix bug in one of my typescript proj
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> policy_guard -> classify_relevance -> friendly_response -> save_memory
+ingest_user_message -> policy_guard -> resolve_context -> classify_relevance -> friendly_response -> save_memory
 ```
 
 Portfolio-fit answer:
@@ -923,7 +928,7 @@ uv run portfolio-assistant "can Yubi help with TypeScript backend systems?" --su
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> policy_guard -> classify_relevance -> check_ambiguity -> plan_retrieval -> retrieve_projects -> retrieve_resume -> merge_normalize_context -> generate_answer -> generate_suggestions -> save_memory
+ingest_user_message -> policy_guard -> resolve_context -> classify_relevance -> check_ambiguity -> plan_retrieval -> retrieve_projects -> retrieve_resume -> merge_normalize_context -> generate_answer -> generate_suggestions -> save_memory
 ```
 
 ---
@@ -952,7 +957,9 @@ Current request shape:
 Current behavior:
 
 - if `session_id` is omitted, the API creates a new session and returns its id
+- optional client `history` seeds a new session when no `session_id` is supplied
 - if `session_id` is present and active, the API reuses stored history for that session
+- if both `session_id` and `history` are supplied, the stored session history is authoritative and client `history` is ignored
 - if `session_id` is present but missing or expired, the API returns a client-visible `404` session error rather than silently creating a different conversation
 
 Current response shape:
@@ -960,3 +967,215 @@ Current response shape:
 - `session_id` is always returned so clients can continue the same conversation explicitly
 
 The current implementation uses a simple app-level session store. LangGraph checkpointers were evaluated and intentionally deferred because this repo currently needs only bounded short-term conversation memory.
+
+---
+
+## Backend Optimization Baseline (2026-09-30)
+
+The current relevant path runs relevance classification, retrieval planning, answer generation, and, when eligible, suggestion generation as four serial chat-model calls. A context-dependent follow-up can add a context-resolution call before classification. Resume vector retrieval also makes an embedding request when selected. An off-topic standalone query makes one classification call; an obvious blocked query normally makes none.
+
+The existing graph tests establish these representative routing contracts with stubbed services:
+
+| Query type | Expected route / intent | Expected sources | Contract test |
+| --- | --- | --- | --- |
+| Project question | `portfolio_query` / `projects` | `projects` | `test_relevant_query_routes_to_generate_answer` |
+| Profile question | `portfolio_query` / `profile` | `resume` | `test_identity_query_routes_through_resume_retrieval` |
+| Skills question | `portfolio_query`; intent is not asserted | `resume`, `projects` | `test_skill_query_can_plan_multiple_sources` |
+| General off-topic question | `off_topic` / `off_topic` | none | `test_irrelevant_query_routes_to_friendly_response` |
+| User coding request | `off_topic` / `user_task` | none | `test_user_project_help_routes_to_friendly_response` |
+| Ambiguous project follow-up | `portfolio_query` / `projects` | none; clarification returned | `test_ambiguous_project_reference_returns_clarification` |
+| Prompt extraction request | `off_topic` / `policy_violation` | none; classification skipped | `test_policy_guard_blocks_prompt_extraction_before_classification` |
+
+A local HTTP smoke check called the real `POST /prompt/stream` route through Uvicorn with stubbed model and retrieval services. Both the project and off-topic cases returned `session_started`, progress events, an `answer_chunk`, and `answer_completed`. On this machine, the project case reached its first answer chunk in 148.3 ms and completed in 148.9 ms; the off-topic case reached its first answer chunk in 59.5 ms and completed in 60.0 ms. Individual stubbed graph nodes logged roughly 0.4–0.8 ms. These are transport and orchestration observations, not estimates of OpenAI, GitHub, or Neon latency. Live provider timing and real-model routing accuracy remain unmeasured while API credits are unavailable.
+
+Optimization gate: preserve the route, intent, selected sources, clarification behavior, response fields, and SSE event contract while reducing the two serial classification and retrieval-planning model calls to one decision. Compare call count first, then measure provider latency and routing quality when live calls are available.
+
+### Bite 2: Combined Routing Decision
+
+`RoutingDecision` now returns `route`, `intent`, `sources`, and `reason` in one structured model response. `is_relevant` is derived from `route`, so those fields cannot disagree. The model sees both the domain boundary examples and the available source definitions in `routing_decision.md`. Off-topic responses skip planning and retrieval. For relevant queries, the graph stores proposed sources internally until `check_ambiguity` has ruled out clarification, then `plan_retrieval` publishes them as `retrieval_sources` and `retrieval_reason` without another model request.
+
+An eligible standalone portfolio question now needs three serial chat-model calls: routing, answer, and suggestions. A context-dependent follow-up can need four. Resume vector retrieval can still add an embedding request. This removes one provider round trip from the relevant path. Stubbed HTTP timings check the SSE contract; the live comparison below measures the effect with the configured model on a small sample.
+
+Verification on 2026-10-01: all 82 tests passed. A localhost Uvicorn smoke check called `POST /prompt/stream` for project, multi-source skills, off-topic, and user-task requests with stubbed model and retrieval services. All four returned the expected route and sources, kept `relevance_classified` progress, emitted `retrieval_planned` only for portfolio routes, and completed with the existing SSE event contract. The structured-client test confirms one routing invocation and token-usage event; invalid structured output becomes an upstream-service error. Live provider timing and two routing cases were then checked as described below.
+
+### Live OpenAI Comparison (2026-10-01)
+
+After confirming the configured API key worked, the same `gpt-4.1-mini` model answered matched questions through a running localhost `/prompt/stream` endpoint on the pre-change `main` commit (`0d7dade`) and Bite 2 (`d686f0c`). Both variants used the same configuration and fixed project/resume retrieval text so GitHub and Neon latency did not affect the comparison. The final pair ran Bite 2 first to reduce order and warm-up bias.
+
+| Question / order | Pre-change calls | Bite 2 calls | First answer chunk, pre-change → Bite 2 | Completed, pre-change → Bite 2 |
+| --- | ---: | ---: | ---: | ---: |
+| Projects; pre-change first | 4 | 3 | 6.82 s → 2.97 s | 8.57 s → 4.65 s |
+| AI backend fit; pre-change first | 4 | 3 | 4.63 s → 2.74 s | 6.95 s → 5.25 s |
+| Projects; Bite 2 first | 4 | 3 | 4.06 s → 3.00 s | 5.42 s → 4.36 s |
+
+All six requests completed successfully. Each matched pair returned the same route, intent, and retrieval sources: `projects` for the project question and `projects` plus `resume` for the fit question. The median paired reduction was 1.89 seconds to first answer chunk and 1.71 seconds to completion. These are observed results from a small local sample, not a guaranteed latency reduction; provider variation, answer length, and suggestion generation still affect totals. The comparison verifies the removed model call with live OpenAI, but broader routing accuracy and real GitHub/Neon paths still need separate evaluation.
+
+### Bite 3: Session History Contract (2026-10-01)
+
+Before this fix, `_prepare_effective_request` concatenated stored session turns with `request.history`. FastAPI had already parsed client history into `ConversationTurn` models, but the code then attempted `ConversationTurn(**turn)` on each model. A non-empty client `history` therefore raised `TypeError` and returned HTTP 500 before LangGraph or OpenAI ran. If that conversion had succeeded, an existing session would also have repeated any turns the client sent back.
+
+The API now chooses one history source. For an existing `session_id`, it uses only the server-stored turns. For a request without `session_id`, it creates a session and passes the client-supplied turns through as the initial history. Both `/prompt` and `/prompt/stream` share this preparation step; the CLI's own history flow is unchanged. Missing or expired session IDs continue to return 404.
+
+The live comparison used the pre-change Bite 2 commit (`4f172ef`) and the updated branch through a localhost Uvicorn `/prompt/stream` endpoint. Both used the configured `gpt-4.1-mini` key, the same seeded prior turn, and fixed retrieval facts:
+
+| Follow-up request | Before | After | Context-resolution input tokens |
+| --- | --- | --- | ---: |
+| Existing `session_id` plus repeated client `history` | HTTP 500; no model call | HTTP 200; one prior turn; completed SSE | 179 after |
+| New session with client `history` | HTTP 500; no model call | HTTP 200; one prior turn; completed SSE | 179 after |
+| Existing `session_id` without client `history` | HTTP 200; one prior turn | HTTP 200; one prior turn | 179 before and after |
+
+The repaired repeated-history follow-up reached its first answer chunk in 5.39 seconds; the repaired new-session request did so in 5.12 seconds. The failing requests have no comparable answer latency, so this bite is a correctness fix with avoided duplicate context rather than a measured speedup. Real GitHub/Neon latency was excluded. Concurrent session writes were handled separately in Bite 3a below.
+
+### Bite 3a: Concurrent Turns in One Session (2026-10-01)
+
+Before this fix, both API routes loaded a session snapshot before running the graph and replaced the entire stored history with their graph result on completion. Two overlapping requests could therefore each produce a valid answer but the later write would erase the earlier completed turn.
+
+The API now seeds client-supplied history when creating a session, then appends only the current completed turn to the authoritative store. `/prompt` and `/prompt/stream` share this completion behavior and return the stored history after their own append. No per-session lock is held during LLM work, so both requests can run concurrently. Each answer uses the history snapshot available when its request started; it cannot incorporate another turn that is still in flight. Stored turn order follows completion order, not request arrival order. A failed or cancelled request does not append its incomplete turn; an SSE partial answer is still reported in the error event.
+
+Live verification compared the pre-change commit (`f3bffd1`) with this bite through a running localhost Uvicorn `/prompt/stream` endpoint. Each variant used the configured `gpt-4.1-mini` model, the same fixed retrieval facts and prior session turn, and a barrier at routing to ensure two requests had loaded the same history before either completed:
+
+| Observation | Before | Bite 3a |
+| --- | --- | --- |
+| Concurrent requests reaching routing | 2 | 2 |
+| HTTP/SSE result | Both HTTP 200 with `answer_completed` | Both HTTP 200 with `answer_completed` |
+| Stored turns after both finish | 2: prior + only one new turn | 3: prior + both new turns |
+| First answer chunks, request 1 / 2 | 3.47 s / 4.07 s | 2.17 s / 2.40 s |
+| Completions, request 1 / 2 | 4.72 s / 5.21 s | 3.61 s / 3.69 s |
+
+The timing differences come from one small live sample and provider variation; this bite makes no latency-improvement claim. Fixed retrieval excludes GitHub and Neon latency. Focused tests reproduce the former last-writer-wins failure on both JSON and SSE routes, verify both turns survive after the fix, and verify an SSE error does not save a partial turn. All 88 tests pass.
+
+This guarantee is limited to one process-local `InMemorySessionStore`. Separate app workers or replicas still have independent session stores; Bite 12 below records the Vercel deployment decision and accepted risk.
+
+### Structured-Output Serialization Warning Fix (2026-10-01)
+
+During LangGraph's `messages` streaming mode, LangChain implicitly streamed the routing and suggestion model calls even though their parsed results are only used after completion. The installed `langchain-openai`/OpenAI SDK path serialized a structured response chunk whose `parsed` field contained a Pydantic model but was typed as `None`, producing `PydanticSerializationUnexpectedValue` warnings. This was log noise, not an observed answer failure.
+
+Both `with_structured_output` calls now bind `stream=False` to their underlying chat model. Passing `stream=False` to the outer structured runnable did not work because its parallel wrapper did not forward that invocation keyword to the model. `generate_answer` remains streamed and continues to provide incremental SSE answer chunks. This changes neither the number of model calls nor the public response contract.
+
+Verification: the warning was reproduced as an exception inside `langchain_openai.chat_models.base._astream` during a live graph stream. With the fix, live off-topic routing and portfolio routing/answer/suggestions completed with serializer warnings treated as errors. A localhost Uvicorn `/prompt/stream` follow-up returned HTTP 200, `portfolio_query`, `resume` retrieval, and completed SSE without the warning. All 88 tests pass, including assertions that only the two structured calls disable streaming.
+
+### Bite 4: Bound Public Model Inputs (2026-10-03)
+
+Previously, the shared `PromptRequest` required a non-empty prompt but had no maximum for the prompt, submitted history, or client-supplied `assistant_subject`. The session store's 10-turn cap is applied when storing history; it does not limit a new request before graph execution. A large prompt or history could therefore reach model-facing work, increasing cost and risking provider context-limit failures. The current browser client normally sends only `prompt` and `session_id`, so the new limits have headroom for its usual requests.
+
+FastAPI now validates public requests with `ApiPromptRequest`, a bounded subclass of the shared request model. The CLI continues to use `PromptRequest` unchanged:
+
+| Public API field | Limit | Reason |
+| --- | ---: | --- |
+| `prompt` | 4,000 characters | Bound the question sent to routing and answer generation |
+| Submitted `history` | 10 turns | Match the default stored-session turn cap |
+| Submitted history text | 24,000 characters total across `user` and `assistant` | Bound text from a newly seeded session, including one oversized turn |
+| Optional `assistant_subject` | 120 characters | Close another client-controlled path into model prompts |
+
+All limits are inclusive. Over-limit input returns the existing `422 VALIDATION_ERROR` shape with a field-level detail before either prompt runner starts; the API does not truncate user input. This also applies to over-limit `history` supplied with an existing `session_id`, even though valid client history is ignored for that session. Clients should omit history once they have a session ID. The limits are fixed API policy, separate from configurable server-owned history retention.
+
+On a localhost Uvicorn `/prompt/stream` comparison with an instrumented runner, a normal request completed both before and after. Five over-limit cases (4,001 prompt characters, 11 history turns, 24,001 history characters, 121 subject characters, and 11 ignored turns with a session ID) each changed from HTTP 200 plus one runner call to HTTP 422 plus zero runner calls. Exact-boundary inputs passed on both JSON and SSE routes. A live `gpt-4.1-mini` follow-up with fixed retrieval still returned HTTP 200, `portfolio_query`, `resume` retrieval, two response history turns, and the same 179 context-resolution input tokens before and after. Its first-answer times were 7.25 seconds before and 3.98 seconds after, but one provider-dependent pair is not evidence of a latency improvement. All 101 tests pass.
+
+This protects model-facing public fields, not the total raw HTTP body: FastAPI still parses the JSON before field validation, and unknown or disallowed fields may carry large text. A transport-level body-byte cap would be a separate public-abuse hardening step if needed. Server-generated answers and stored turns are bounded by turn count, not by this incoming-history character limit. The current frontend maps `VALIDATION_ERROR` to a generic message; showing the field-specific limit is a separate frontend UX follow-up.
+
+### Bite 5: Concurrent Cold GitHub README Fetching (2026-10-03)
+
+Broad project retrieval previously fetched each selected repository's README sequentially after listing repositories. With 12 cold README requests, this network loop dominated project retrieval latency. The in-process cache already avoids those calls on a warm request; the optimization targets only cache misses.
+
+`_fetch_repository_readmes_cached` now runs misses through `asyncio.gather` with a semaphore of three shared by the retrieval service across overlapping requests. Cached excerpts are reused, successful and missing READMEs are cached under the existing `(repository name, excerpt limit)` key, and the final response is still formatted in selected-repository order. A named-project query still fetches at most one README. Existing 404/HTTP failure handling remains best-effort: one missing README does not remove its repository metadata or block the others. No new dependency or configuration knob was added.
+
+Two fresh-process localhost Uvicorn `/prompt/stream` comparisons used the same configured GitHub owner/token and live `gpt-4.1-mini` model. Every request selected the `portfolio_query` route, used `projects` retrieval, completed SSE, fetched 12 READMEs, and reported no retrieval errors. Each process began with an empty GitHub cache:
+
+| Run order | Before: peak / project retrieval | Bite 5: peak / project retrieval | First answer, before → after |
+| --- | --- | --- | --- |
+| Before then after | 1 / 8.23 s | 3 / 2.71 s | 12.56 s → 5.97 s |
+| After then before | 1 / 5.14 s | 3 / 2.63 s | 8.01 s → 6.12 s |
+
+The observed paired project-retrieval reductions were 5.53 and 2.51 seconds. End-to-end answer timing includes variable OpenAI latency and answer length, so these two pairs do not establish a guaranteed response-time gain. After moving the semaphore onto the shared retrieval service, a final cold live SSE run still completed with 12 README fetches, peak concurrency three, no retrieval errors, and 2.85 seconds in project retrieval. Focused tests verify the shared three-request ceiling even across overlapping top-level requests, selected output order, timeout isolation, warm-cache reuse, and zero-TTL behavior. The full suite passes with 102 tests.
+
+Trade-off: a cold request now sends up to three README requests at once instead of one. This is a small fixed ceiling to avoid a 12-request burst. The cache and concurrency limit remain process-local; simultaneous top-level requests may independently fetch the same uncached README, but their combined README request concurrency is still capped at three within that service instance.
+
+### Bite 6: Keep Resume Vector Search Off the Event Loop (2026-10-03)
+
+Resume retrieval already awaited the OpenAI query embedding, but then called the synchronous `ResumeVectorStore.search` directly inside the async retrieval method. That call opens a psycopg connection and waits for a pgvector query, so one resume request could stall unrelated requests on the same event loop. The CLI/indexing methods remain synchronous.
+
+The runtime now hands only `store.search(...)` to `asyncio.to_thread`. The existing SQL, embedding request, result formatting, error handling, and local-file override are unchanged. A focused test first failed on the old path: a separate async task could not run during a simulated blocking search. It passes after the handoff. This chooses a small thread boundary over an async-driver migration or connection pool, neither of which is justified by this bite's evidence.
+
+A localhost Uvicorn `/prompt/stream` comparison used the configured live OpenAI model and Neon resume index. Both variants returned HTTP 200, `portfolio_query`, `resume`, one successful vector search, no retrieval errors, and completed SSE. To make contention comparable, each real search included the same controlled 400 ms wait; an independent client sent `GET /` while search was active:
+
+| Variant | Search including controlled wait | Concurrent health response |
+| --- | ---: | ---: |
+| Before: search on event loop | 791.5 ms | 805.1 ms |
+| Bite 6: search in worker thread | 768.4 ms | 14.2 ms |
+
+A further normal-path SSE run without injected wait completed with a 354.7 ms vector search, a 5.5 ms concurrent health response, and no retrieval error. All 103 tests pass. These measurements demonstrate improved responsiveness under contention, not a guaranteed reduction in the time for one isolated answer; model and database latency vary between runs.
+
+Trade-off: synchronous database work now occupies a worker thread instead of the event loop. A cancelled request cannot forcibly stop an in-flight psycopg operation, and heavy traffic could still exhaust the default thread pool or database connections. No new pool, timeout setting, or embedding-client lifecycle change is introduced here.
+
+### Bite 7: Protect Multi-Source Answer Context (2026-10-03)
+
+The merge node previously concatenated sources in planned order and cut the combined string at `MERGED_CONTEXT_MAX_CHARS` (default 12,000). This made source order decisive when the cap was reached: a live broad GitHub project result was 22,363 characters, followed by 2,603 characters of resume evidence, so none of the resume reached answer generation. The configured docs source returned no content in that probe; docs coverage uses a deterministic fixture.
+
+The merge still preserves planned source order and labels. If all content fits, it is unchanged; a single overflowing source keeps the prior prefix behavior. Only a multi-source overflow uses source-aware allocation: subtract section labels and separators from the cap, reserve an equal initial character share for each nonempty section, then give unused capacity to sections in planned order. This is work-conserving within the character cap. When the cap is too small to hold the labels and at least one character per source, it falls back to the prior prefix cut. Source retrieval, ranking, and answer prompts are unchanged.
+
+A deterministic test with an oversized project section confirms the capped answer context retains complete resume and docs facts, keeps order, and reuses their spare space for projects. A second test confirms under-cap and single-source outputs are unchanged. In a localhost `/prompt/stream` comparison using real GitHub, Neon, and OpenAI, both variants selected `portfolio_query` with `projects` and `resume`, returned HTTP 200, completed SSE, and reported no retrieval errors. Both retrieved 22,499 project characters and 2,603 resume characters. The old 12,000-character answer context had a projects section but no resume section; Bite 7's 12,000-character context had both. All 105 tests pass.
+
+Trade-off: when several large sources compete for the cap, each receives less space than a projects-first prefix would give the first source. This protects source coverage, not the relevance of each retained excerpt; changing per-source ranking or summarization remains separate work. The cap is still character-based, not a model-token budget, and no single-response latency improvement is claimed.
+
+### Bite 8: Check Original User Text Before Context Resolution (2026-10-03)
+
+Previously, the graph rewrote context-dependent prompts before running the deterministic policy guard. A blocked follow-up could therefore pay for an unnecessary OpenAI rewrite. Worse, if that rewrite omitted the blocked wording, the guard could allow the request to continue. A live pre-change localhost `/prompt/stream` request with seeded history reproduced this: a prompt-extraction follow-up made one context-resolution call and reached the `portfolio_query`/`projects` path, taking 7.79 seconds to complete.
+
+The graph now checks raw user text immediately after ingest. Blocked requests go straight to the deterministic friendly response with zero model calls. Allowed requests still run context resolution; if it changes the query, the same patterns check the rewrite before classification. The guard patterns and response wording are unchanged. The node trace and SSE progress order for allowed requests is now policy then context. An initially blocked request has no context-resolution node or progress event.
+
+The matched live post-change request returned HTTP 200, completed SSE, `off_topic`/`policy_violation`, and made zero context-resolution calls; it reached its first answer in 420 ms. This is both a safety correction and a saved provider call, so the changed route is intentional. A separate live legitimate follow-up still used one context-resolution call, rewrote “this project” to MatchCast, selected `portfolio_query`/`projects`, completed SSE, and had no retrieval errors. Focused tests cover blocked raw follow-ups, unsafe rewritten follow-ups, and ordinary follow-ups; all 107 tests pass.
+
+Trade-off: the deterministic raw-text guard can block a query that an LLM might have sanitized during rewriting. This is intentional for explicit unsafe requests, but the existing narrow-pattern false-positive risk remains. The rewrite recheck is performed only when the text changes, since unchanged text already passed the raw guard.
+
+### Bite 9: Measure Suggestion Tail Latency (2026-10-03)
+
+For eligible portfolio answers, `generate_suggestions` runs after answer generation and before `save_memory` and SSE `answer_completed`. The answer streams earlier, but the completed event carries the three structured `suggested_prompts`. Two localhost Uvicorn `/prompt/stream` runs used live OpenAI with identical fixed project evidence to isolate this tail from GitHub and Neon variation:
+
+| Run | Last answer chunk | Answer node done | Suggestions done | `answer_completed` | Suggestions |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Live 1 | 3.30 s | 3.33 s | 4.50 s | 4.51 s | 3 |
+| Live 2 | 3.58 s | 3.61 s | 4.66 s | 4.67 s | 3 |
+| Experimental skip | 3.03 s | 3.06 s | 3.06 s | 3.06 s | 0 |
+
+The suggestion step accounted for about 1.18 and 1.06 seconds after answer-node completion in the two live runs. The skip run is a lower-bound latency comparison, not a quality-equivalent replacement. All three requests returned HTTP 200, `portfolio_query`/`projects`, completed SSE, and had no retrieval errors. The current frontend displays streamed chunks promptly but buffers the final word until `answer_completed`, so this tail can still be noticeable at the end of a response.
+
+Decision: keep the grounded model-generated suggestions and existing SSE contract. Removing the call would remove three useful prompts; a deterministic replacement has not been shown to match their relevance. Running the call before the answer would lose answer grounding. A frontend end-of-answer flush or an explicit opt-out could be considered separately if the measured tail becomes a UX priority, but neither is introduced in this backend bite. No runtime code or behavior changed; all 107 tests pass.
+
+### Bite 10: Harden Retrieval Failures (2026-10-03)
+
+`RetrievalResult.error` reaches the API response and the SSE `answer_completed.retrieval_errors` field. Previously, GitHub HTTP errors, resume embedding/database exceptions, and local-file read errors appended raw exception text to that public field; a missing local file also exposed its configured path. Malformed GitHub repository JSON escaped retrieval as a graph failure, while malformed README JSON discarded otherwise usable repository metadata.
+
+GitHub and resume-vector failures now log exception details server-side and return fixed, source-specific public messages. Missing-file and read failures return path-free messages and log their diagnostics. Invalid repository JSON follows the same non-fatal GitHub failure path. A malformed individual README is skipped like other README failures, retaining the repository's metadata and other sources. Missing configuration and empty-index messages retain their existing behavior. Server logs may contain sensitive diagnostic detail and should remain access-controlled.
+
+Before the fix, four focused regression cases failed: embedding/database details, GitHub details, and a configured path appeared in public errors, and invalid GitHub JSON escaped the retrieval result. An additional README regression showed loss of project metadata. After the fix, all 113 tests pass. A localhost Uvicorn `/prompt/stream` probe with live OpenAI and injected fake GitHub, embedding, and database failures returned HTTP 200 and completed SSE for all three cases; `retrieval_errors` contained only `GitHub project retrieval failed.` or `Resume vector retrieval failed.`, and no fake detail appeared anywhere in the SSE stream. This is a reliability/privacy correction, not a latency optimization; the observed endpoint durations include variable model latency and are not used as a speed comparison.
+
+### Bite 11: Jev Candidate Assessment (Deferred, 2026-10-03)
+
+The proposed “JEV” is TypeSafe AI's hosted [Jev System One model](https://typesafe.ai/blog/introducing-system-one-models-and-jev), not a package already used by this project. TypeSafe publishes a [Python SDK](https://docs.typesafe.ai/sdk/python) with an async client, and the existing `httpx` dependency could also call its [HTTP API](https://api.typesafe.ai/redoc) for an isolated evaluation. Its [Choice and Noul primitives](https://docs.typesafe.ai/primitives/choice) can batch a route choice and separate source judgments in one request. The vendor advertises low decision latency, but that is not a measurement from this application or its eventual deployment location.
+
+The current OpenAI `RoutingDecision` returns `route`, an open-ended `intent`, an ordered list of `sources`, and a free-text `reason` in one structured call. Jev's bounded answers cannot generate that `reason`; an adapter would need a fixed intent taxonomy, deterministic source ordering and reason templates, and rules for conflicting or uncertain judgments. `intent` affects friendly off-topic responses and suggestion eligibility, so it cannot be dropped as mere telemetry. Any such mapping could change public response fields or behavior and must be tested explicitly. Jev's own [known limitations](https://docs.typesafe.ai/model-jaggedness/jev-1.13) include literal reading, option-order sensitivity, and adversarial user-controlled state; neither type safety nor low latency establishes routing accuracy.
+
+No `TYPESAFE_API_KEY` is configured, so no Jev call, accuracy comparison, or end-to-end latency claim has been made. Decision with the project owner: keep the current OpenAI router and defer Jev integration; the extra provider and contract-mapping work is not justified without measured quality and latency gains. This closes the present evaluation without claiming Jev is unsuitable in general. If revisited, run a local-only, side-by-side evaluation of labeled portfolio/off-topic/user-task/profile/multi-source/follow-up cases, including technology-name false positives and ambiguous queries. Compare route, intent, selected sources, confidence/fallback rate, API latency, and estimated cost before proposing a runtime swap. No runtime behavior changed.
+
+### Bite 12: Shared Runtime State Decision (Deferred, 2026-10-03)
+
+The backend is deployed to Vercel production, although development also uses one local Uvicorn process. The repository's Vercel entry point exports the same FastAPI app. [Vercel Functions](https://vercel.com/docs/functions) may reuse a warm instance, create other instances under load, and scale down when idle; a production deployment is not a guarantee of one durable Python process. The deployment screenshot showed production sourced from `main` at `0d7dade` when this review was made, so the backend-optimization branch was not yet deployed.
+
+Current process-local state has different consequences:
+
+| State | Across a function instance change | Priority if revisited |
+| --- | --- | --- |
+| `InMemorySessionStore` | A valid conversation `session_id` can return `404 SESSION_NOT_FOUND`; prior turns are lost on restart or cold start. | First: user-visible correctness |
+| `RateLimitGuard` using `MemoryStorage` | Request/auth limits apply per instance, not globally; effective protection can weaken with scale. | Next: cost and abuse protection |
+| `ActiveStreamRegistry` | The active-stream cap applies per instance, not across the deployment. | Next: concurrency protection |
+| GitHub repository/README cache | Each instance warms its own cache, increasing cold GitHub requests and latency. | Later: performance only |
+
+The auth refresh/access JWTs are signed and validated from shared configuration rather than this conversation store; their `sid` claim is not the API conversation `session_id`. The local 113-test suite and stubbed localhost `/prompt/stream` smoke passed during the review, confirming the existing single-process path but not cross-instance Vercel behavior. No live Vercel cross-instance failure or traffic-based benefit was measured.
+
+Decision: accept this risk temporarily at the current low-traffic stage and make no storage change in this planning bite. Revisit shared sessions first if a valid follow-up gets `SESSION_NOT_FOUND`, if conversation continuity across cold starts becomes a product requirement, or before relying on production follow-ups at scale. Revisit global rate and stream limits before treating them as hard deployment-wide cost/abuse caps. The cache may remain local unless cold-fetch volume warrants sharing. A future migration must preserve TTL, bounded history, atomic completed-turn appends, and the existing API/SSE contract; the backing store should be selected then, rather than adding infrastructure speculatively now.
+
+### Bite 13: Remove Unused Interfaces (2026-10-03)
+
+A call-site audit found no use of `AssistantService.stream_answer` or `OpenAIAssistantClient.stream_answer`: the API's SSE path consumes LangGraph `messages` and `updates` from `graph.astream`, filtering answer chunks from `generate_answer`. The old sequential `_fetch_repository_readmes` helper also had no caller after Bite 5 moved active fetching into `_fetch_repository_readmes_cached`; the single-README fetcher remains in use there. These three dead declarations/implementations were removed. `InMemorySessionStore.append_turn` remains because both API routes use it for completed turns.
+
+No runtime path or public contract was changed. The full suite passed (113 tests), and a localhost Uvicorn probe using live OpenAI, GitHub, and Neon completed SSE for project, resume, multi-source, off-topic, user-task, session follow-up, and policy-guard cases; an oversized request still returned `422 VALIDATION_ERROR`. Project/resume/multi-source cases had no retrieval errors, and the session follow-up retained two turns even when client history was repeated. Separate live injected GitHub, embedding, and database failures still produced completed SSE with stable non-sensitive retrieval errors. The probe server stopped after verification. These are local-branch checks, not tests of the older Vercel production deployment. One weather off-topic probe received `intent=user_task` despite the correct `off_topic` route, so its friendly wording may be overly task-specific; this is a model classification quality observation, not caused by removing unused code.

@@ -1,4 +1,3 @@
-from collections.abc import AsyncIterator
 from contextvars import ContextVar
 import re
 from typing import Any
@@ -8,12 +7,11 @@ from langchain_openai import ChatOpenAI
 from app.config import Settings
 from app.errors import UpstreamServiceError
 from app.graph.state import ConversationTurnState
-from app.services.assistant import RelevanceDecision, RetrievalPlan, SuggestedPrompts
+from app.services.assistant import RoutingDecision, SuggestedPrompts
 from app.services.prompt_templates import (
     build_answer_messages,
     build_context_resolution_messages,
-    build_relevance_messages,
-    build_retrieval_planning_messages,
+    build_routing_messages,
     build_suggestion_messages,
 )
 
@@ -54,32 +52,19 @@ class OpenAIAssistantClient:
         rewritten = response.text.strip()
         return rewritten or query
 
-    async def classify_relevance(self, query: str, assistant_subject: str) -> RelevanceDecision:
-        structured_model = self._chat.with_structured_output(RelevanceDecision, include_raw=True)
+    async def classify_and_plan(self, query: str, assistant_subject: str) -> RoutingDecision:
+        structured_model = self._chat.with_structured_output(RoutingDecision, include_raw=True, stream=False)
         response = await self._invoke_with_error_context(
-            "relevance classification",
+            "routing decision",
             lambda: structured_model.ainvoke(
-                build_relevance_messages(query=query, assistant_subject=assistant_subject)
+                build_routing_messages(query=query, assistant_subject=assistant_subject)
             ),
         )
-        parsed = _extract_structured_response(response)
-        self._record_token_usage("relevance_classification", _extract_raw_response(response))
-        return parsed
-
-    async def plan_retrieval(self, query: str, assistant_subject: str, intent: str | None = None) -> RetrievalPlan:
-        structured_model = self._chat.with_structured_output(RetrievalPlan, include_raw=True)
-        response = await self._invoke_with_error_context(
-            "retrieval planning",
-            lambda: structured_model.ainvoke(
-                build_retrieval_planning_messages(
-                    query=query,
-                    assistant_subject=assistant_subject,
-                    intent=intent,
-                )
-            )
-        )
-        parsed = _extract_structured_response(response)
-        self._record_token_usage("retrieval_planning", _extract_raw_response(response))
+        try:
+            parsed = RoutingDecision.model_validate(_extract_structured_response(response))
+        except ValueError as exc:
+            raise UpstreamServiceError("AI service returned an invalid routing decision.") from exc
+        self._record_token_usage("routing_decision", _extract_raw_response(response))
         return parsed
 
     async def generate_answer(self, query: str, assistant_subject: str, portfolio_context: str) -> str:
@@ -104,7 +89,7 @@ class OpenAIAssistantClient:
         answer: str,
         intent: str | None = None,
     ) -> SuggestedPrompts:
-        structured_model = self._chat.with_structured_output(SuggestedPrompts, include_raw=True)
+        structured_model = self._chat.with_structured_output(SuggestedPrompts, include_raw=True, stream=False)
         response = await self._invoke_with_error_context(
             "suggestion generation",
             lambda: structured_model.ainvoke(
@@ -120,20 +105,6 @@ class OpenAIAssistantClient:
         parsed = _extract_structured_response(response)
         self._record_token_usage("suggestion_generation", _extract_raw_response(response))
         return SuggestedPrompts(prompts=_normalize_suggestions(parsed.prompts))
-
-    async def stream_answer(self, query: str, assistant_subject: str, portfolio_context: str) -> AsyncIterator[str]:
-        try:
-            async for chunk in self._chat.astream(
-                build_answer_messages(
-                    query=query,
-                    assistant_subject=assistant_subject,
-                    portfolio_context=portfolio_context,
-                )
-            ):
-                if chunk.text:
-                    yield chunk.text
-        except Exception as exc:
-            raise UpstreamServiceError("AI service failed during answer streaming.") from exc
 
     def build_friendly_response(self, assistant_subject: str, intent: str | None = None) -> str:
         if intent == "policy_violation":

@@ -137,8 +137,12 @@ async def test_generate_answer_records_token_usage():
 
 
 @pytest.mark.asyncio
-async def test_classify_relevance_records_structured_token_usage():
-    async def fake_ainvoke(_messages):
+async def test_classify_and_plan_records_one_structured_call_and_token_usage():
+    calls = []
+    structured_kwargs = []
+
+    async def fake_ainvoke(_messages, **kwargs):
+        calls.append((_messages, kwargs))
         return {
             "raw": SimpleNamespace(
                 usage_metadata={
@@ -147,32 +151,56 @@ async def test_classify_relevance_records_structured_token_usage():
                     "total_tokens": 10,
                 }
             ),
-            "parsed": openai_client_module.RelevanceDecision(
+            "parsed": openai_client_module.RoutingDecision(
                 route="portfolio_query",
-                is_relevant=True,
                 intent="projects",
+                sources=["projects"],
+                reason="Project questions need project data.",
             ),
             "parsing_error": None,
         }
 
+    def fake_structured_output(_model, **kwargs):
+        structured_kwargs.append(kwargs)
+        return SimpleNamespace(ainvoke=fake_ainvoke)
+
     client = OpenAIAssistantClient(_test_settings())
-    client._chat = SimpleNamespace(
-        with_structured_output=lambda _model, include_raw=False: SimpleNamespace(ainvoke=fake_ainvoke)
-    )
+    client._chat = SimpleNamespace(with_structured_output=fake_structured_output)
 
-    decision = await client.classify_relevance("What projects?", "Alex")
+    decision = await client.classify_and_plan("What projects?", "Alex")
 
+    assert len(calls) == 1
+    assert calls[0][1] == {}
+    assert structured_kwargs == [{"include_raw": True, "stream": False}]
     assert decision.intent == "projects"
-    assert client.consume_token_usage("relevance_classification") == {
+    assert decision.sources == ["projects"]
+    assert decision.reason == "Project questions need project data."
+    assert client.consume_token_usage("routing_decision") == {
         "input_tokens": 8,
         "output_tokens": 2,
         "total_tokens": 10,
     }
+    assert client.consume_token_usage("retrieval_planning") is None
+
+
+@pytest.mark.asyncio
+async def test_classify_and_plan_rejects_invalid_structured_output():
+    async def fake_ainvoke(_messages):
+        return {"raw": None, "parsed": None, "parsing_error": "missing sources"}
+
+    client = OpenAIAssistantClient(_test_settings())
+    client._chat = SimpleNamespace(
+        with_structured_output=lambda _model, **_kwargs: SimpleNamespace(ainvoke=fake_ainvoke)
+    )
+
+    with pytest.raises(UpstreamServiceError, match="invalid routing decision"):
+        await client.classify_and_plan("What projects?", "Alex")
 
 
 @pytest.mark.asyncio
 async def test_generate_suggestions_returns_normalized_structured_prompts():
     captured_messages = []
+    structured_kwargs = []
 
     async def fake_ainvoke(messages):
         captured_messages.extend(messages)
@@ -186,10 +214,12 @@ async def test_generate_suggestions_returns_normalized_structured_prompts():
             ]
         )
 
+    def fake_structured_output(_model, **kwargs):
+        structured_kwargs.append(kwargs)
+        return SimpleNamespace(ainvoke=fake_ainvoke)
+
     client = OpenAIAssistantClient(_test_settings())
-    client._chat = SimpleNamespace(
-        with_structured_output=lambda _model, include_raw=False: SimpleNamespace(ainvoke=fake_ainvoke)
-    )
+    client._chat = SimpleNamespace(with_structured_output=fake_structured_output)
 
     suggestions = await client.generate_suggestions(
         query="Tell me about MatchCast",
@@ -204,6 +234,7 @@ async def test_generate_suggestions_returns_normalized_structured_prompts():
         "What stack did it use?",
         "How is it deployed?",
     ]
+    assert structured_kwargs == [{"include_raw": True, "stream": False}]
     suggestion_input = "\n".join(message[1] for message in captured_messages)
     assert "Assistant answer:\nMatchCast answer" in suggestion_input
     assert "Large MatchCast project context" not in suggestion_input
@@ -213,7 +244,7 @@ async def test_generate_suggestions_returns_normalized_structured_prompts():
 async def test_generate_suggestions_wraps_upstream_failure():
     client = OpenAIAssistantClient(_test_settings())
     client._chat = SimpleNamespace(
-        with_structured_output=lambda _model, include_raw=False: SimpleNamespace(ainvoke=_failing_ainvoke)
+        with_structured_output=lambda _model, **_kwargs: SimpleNamespace(ainvoke=_failing_ainvoke)
     )
 
     with pytest.raises(UpstreamServiceError, match="suggestion generation"):

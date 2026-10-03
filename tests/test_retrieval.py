@@ -1,8 +1,11 @@
+import asyncio
+import base64
+import time
+
 from app.config import Settings
 from app.graph.constants import RetrievalSource
 from app.services import retrieval as retrieval_module
 from app.services.retrieval import ConfiguredPortfolioRetrievalService
-import base64
 
 
 async def test_resume_retrieval_reads_configured_text_file(tmp_path, monkeypatch):
@@ -73,6 +76,46 @@ async def test_resume_retrieval_uses_vector_store_when_configured(tmp_path, monk
     assert "resume vector retrieval complete" in caplog.text
 
 
+async def test_resume_vector_search_does_not_block_other_async_work(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(retrieval_module, "OpenAIEmbeddings", FakeEmbeddings)
+    search_active = False
+
+    class SlowResumeVectorStore:
+        def __init__(self, database_url):
+            pass
+
+        def search(self, *, namespace, query_embedding, limit):
+            nonlocal search_active
+            search_active = True
+            try:
+                time.sleep(0.15)
+            finally:
+                search_active = False
+            return []
+
+    monkeypatch.setattr(retrieval_module, "ResumeVectorStore", SlowResumeVectorStore)
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            NEON_DATABASE_URL_STRING="postgresql://example",
+        )
+    )
+
+    async def observe_event_loop():
+        await asyncio.sleep(0.01)
+        return search_active
+
+    observed_during_search, result = await asyncio.gather(
+        observe_event_loop(), service.retrieve_resume(query="education")
+    )
+
+    assert observed_during_search
+    assert result.error == "No indexed resume chunks were found. Run portfolio-index-resume before serving resume queries."
+
+
 async def test_resume_path_override_keeps_local_file_retrieval_when_vectors_are_configured(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(retrieval_module, "OpenAIEmbeddings", FakeEmbeddings)
@@ -115,6 +158,74 @@ async def test_resume_vector_retrieval_reports_missing_index(tmp_path, monkeypat
     assert result.error == "No indexed resume chunks were found. Run portfolio-index-resume before serving resume queries."
 
 
+async def test_resume_vector_retrieval_hides_embedding_and_database_errors(tmp_path, monkeypatch, caplog):
+    monkeypatch.chdir(tmp_path)
+    caplog.set_level("WARNING", logger="app.services.retrieval")
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            NEON_DATABASE_URL_STRING="postgresql://example",
+        )
+    )
+
+    class FailingEmbeddings(FakeEmbeddings):
+        async def aembed_query(self, query):
+            raise RuntimeError("fake embedding key: sk-test-sensitive")
+
+    class FailingVectorStore:
+        def __init__(self, database_url):
+            pass
+
+        def search(self, *, namespace, query_embedding, limit):
+            raise RuntimeError("fake database URL: postgresql://user:password@example")
+
+    monkeypatch.setattr(retrieval_module, "OpenAIEmbeddings", FailingEmbeddings)
+    embedding_result = await service.retrieve_resume(query="education")
+    monkeypatch.setattr(retrieval_module, "OpenAIEmbeddings", FakeEmbeddings)
+    monkeypatch.setattr(retrieval_module, "ResumeVectorStore", FailingVectorStore)
+    database_result = await service.retrieve_resume(query="education")
+
+    assert embedding_result.error == "Resume vector retrieval failed."
+    assert database_result.error == "Resume vector retrieval failed."
+    assert "sk-test-sensitive" in caplog.text
+    assert "postgresql://user:password@example" in caplog.text
+
+
+async def test_docs_retrieval_hides_configured_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(_env_file=None, OPENAI_API_KEY="test", ASSISTANT_SUBJECT="Alex")
+    )
+    private_path = tmp_path / "private-docs.txt"
+
+    result = await service.retrieve_docs(str(private_path))
+
+    assert result.error == "DOCS_PATH points to a missing file."
+    assert str(private_path) not in result.error
+
+
+async def test_docs_retrieval_hides_file_read_error(tmp_path, monkeypatch, caplog):
+    monkeypatch.chdir(tmp_path)
+    caplog.set_level("WARNING", logger="app.services.retrieval")
+    docs_path = tmp_path / "private-docs.txt"
+    docs_path.write_text("test", encoding="utf-8")
+
+    def fail_read(*args, **kwargs):
+        raise OSError("fake private file detail")
+
+    monkeypatch.setattr(retrieval_module.Path, "read_text", fail_read)
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(_env_file=None, OPENAI_API_KEY="test", ASSISTANT_SUBJECT="Alex")
+    )
+
+    result = await service.retrieve_docs(str(docs_path))
+
+    assert result.error == "Could not read docs file."
+    assert "fake private file detail" in caplog.text
+
+
 async def test_project_retrieval_reports_missing_github_owner(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     service = ConfiguredPortfolioRetrievalService(
@@ -126,6 +237,99 @@ async def test_project_retrieval_reports_missing_github_owner(tmp_path, monkeypa
     assert result.source == RetrievalSource.PROJECTS
     assert result.content == ""
     assert result.error == "GITHUB_OWNER is not configured, so project retrieval was skipped."
+
+
+async def test_project_retrieval_hides_github_exception(tmp_path, monkeypatch, caplog):
+    monkeypatch.chdir(tmp_path)
+    caplog.set_level("WARNING", logger="app.services.retrieval")
+
+    class FailingGitHubClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        async def get(self, url, headers=None, params=None):
+            raise retrieval_module.httpx.ConnectError("fake GitHub token: ghp_test_sensitive")
+
+    monkeypatch.setattr(retrieval_module.httpx, "AsyncClient", lambda timeout: FailingGitHubClient())
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(_env_file=None, OPENAI_API_KEY="test", ASSISTANT_SUBJECT="Alex", GITHUB_OWNER="alex")
+    )
+
+    result = await service.retrieve_projects()
+
+    assert result.error == "GitHub project retrieval failed."
+    assert "ghp_test_sensitive" in caplog.text
+
+
+async def test_project_retrieval_handles_invalid_github_json(tmp_path, monkeypatch, caplog):
+    monkeypatch.chdir(tmp_path)
+    caplog.set_level("WARNING", logger="app.services.retrieval")
+
+    class InvalidJsonClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        async def get(self, url, headers=None, params=None):
+            class InvalidResponse:
+                def raise_for_status(self):
+                    return None
+
+                def json(self):
+                    raise ValueError("fake malformed payload: private-provider-detail")
+
+            return InvalidResponse()
+
+    monkeypatch.setattr(retrieval_module.httpx, "AsyncClient", lambda timeout: InvalidJsonClient())
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(_env_file=None, OPENAI_API_KEY="test", ASSISTANT_SUBJECT="Alex", GITHUB_OWNER="alex")
+    )
+
+    result = await service.retrieve_projects()
+
+    assert result.error == "GitHub project retrieval failed."
+    assert "private-provider-detail" in caplog.text
+
+
+async def test_project_retrieval_keeps_metadata_when_readme_json_is_invalid(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    class InvalidReadmeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        async def get(self, url, headers=None, params=None):
+            if url.endswith("/users/alex/repos"):
+                return FakeResponse([{"name": "sample-project", "fork": False, "description": "Sample"}])
+
+            class InvalidResponse:
+                status_code = 200
+
+                def raise_for_status(self):
+                    return None
+
+                def json(self):
+                    raise ValueError("fake private README provider detail")
+
+            return InvalidResponse()
+
+    monkeypatch.setattr(retrieval_module.httpx, "AsyncClient", lambda timeout: InvalidReadmeClient())
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(_env_file=None, OPENAI_API_KEY="test", ASSISTANT_SUBJECT="Alex", GITHUB_OWNER="alex")
+    )
+
+    result = await service.retrieve_projects()
+
+    assert result.error is None
+    assert "sample-project" in result.content
 
 
 async def test_project_retrieval_enriches_repositories_with_readme(tmp_path, monkeypatch):
@@ -176,6 +380,84 @@ async def test_project_retrieval_uses_in_memory_github_cache(tmp_path, monkeypat
     assert fake_client.get_calls.count("readme:project-with-readme") == 1
     assert fake_client.get_calls.count("readme:project-with-readme-api") == 1
     assert fake_client.get_calls.count("readme:project-without-readme") == 1
+
+
+async def test_project_retrieval_bounds_readme_concurrency_and_preserves_order(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    class SlowGitHubClient:
+        def __init__(self):
+            self.active = 0
+            self.peak = 0
+            self.readme_calls = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        async def get(self, url, headers=None, params=None):
+            if url.endswith("/users/alex/repos"):
+                return FakeResponse([{"name": f"project-{number}", "fork": False} for number in range(1, 8)])
+
+            name = url.split("/")[-2]
+            self.readme_calls.append(name)
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+            try:
+                await asyncio.sleep(0.01 * (8 - int(name[-1])))
+            finally:
+                self.active -= 1
+            if name == "project-4":
+                raise retrieval_module.httpx.ReadTimeout("simulated README timeout")
+            encoded = base64.b64encode(f"README for {name}".encode()).decode()
+            return FakeResponse({"content": encoded})
+
+    fake_client = SlowGitHubClient()
+    monkeypatch.setattr(retrieval_module.httpx, "AsyncClient", lambda timeout: fake_client)
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            GITHUB_OWNER="alex",
+            GITHUB_PROJECTS_LIMIT=7,
+            GITHUB_CACHE_TTL_SECONDS=900,
+        )
+    )
+
+    first_result = await service.retrieve_projects()
+    second_result = await service.retrieve_projects()
+
+    assert first_result.error is None
+    assert first_result.content == second_result.content
+    assert fake_client.peak == 3
+    assert len(fake_client.readme_calls) == 7
+    for number in range(1, 8):
+        name = f"project-{number}"
+        section = first_result.content.split(f"- {name}\n", 1)[1].split("\n- project-", 1)[0]
+        assert (f"README for {name}" in section) == (number != 4)
+    assert [first_result.content.index(f"- project-{number}\n") for number in range(1, 8)] == sorted(
+        first_result.content.index(f"- project-{number}\n") for number in range(1, 8)
+    )
+
+    uncached_service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            GITHUB_OWNER="alex",
+            GITHUB_PROJECTS_LIMIT=7,
+            GITHUB_CACHE_TTL_SECONDS=0,
+        )
+    )
+    overlapping_results = await asyncio.gather(
+        uncached_service.retrieve_projects(), uncached_service.retrieve_projects()
+    )
+    assert overlapping_results[0].content == overlapping_results[1].content
+    assert fake_client.peak == 3
+    assert len(fake_client.readme_calls) == 21
 
 
 async def test_project_retrieval_cache_can_be_disabled_with_zero_ttl(tmp_path, monkeypatch):

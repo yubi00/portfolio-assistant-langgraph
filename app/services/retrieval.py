@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import unicodedata
 from time import monotonic
@@ -21,6 +22,7 @@ from app.services.resume_vector_store import RetrievedChunk, ResumeVectorStore
 logger = logging.getLogger("app.services.retrieval")
 
 CacheEntry = tuple[float, object]
+README_FETCH_CONCURRENCY = 3
 
 
 class RetrievalResult(BaseModel):
@@ -58,6 +60,7 @@ class ConfiguredPortfolioRetrievalService:
         self._featured_projects = load_featured_projects(settings.featured_projects_path)
         self._github_repos_cache: CacheEntry | None = None
         self._github_readme_cache: dict[tuple[str, int], CacheEntry] = {}
+        self._readme_fetch_semaphore = asyncio.Semaphore(README_FETCH_CONCURRENCY)
 
     async def retrieve_projects(self, query: str | None = None) -> RetrievalResult:
         if not self._settings.github_owner:
@@ -133,10 +136,11 @@ class ConfiguredPortfolioRetrievalService:
                     repos=selected_repos,
                     max_chars=self._settings.github_readme_max_chars,
                 )
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("GitHub project retrieval failed | reason=%s", exc, exc_info=True)
             return RetrievalResult(
                 source=RetrievalSource.PROJECTS,
-                error=f"GitHub project retrieval failed: {exc}",
+                error="GitHub project retrieval failed.",
             )
 
         return RetrievalResult(
@@ -180,6 +184,7 @@ class ConfiguredPortfolioRetrievalService:
         max_chars: int,
     ) -> dict[str, str]:
         readmes: dict[str, str] = {}
+        cache_misses: list[tuple[str, tuple[str, int]]] = []
         for repo in repos:
             name = repo.get("name")
             if not name:
@@ -188,10 +193,15 @@ class ConfiguredPortfolioRetrievalService:
             cached = self._get_cache_value(self._github_readme_cache.get(cache_key))
             if isinstance(cached, str):
                 logger.debug("GitHub README cache hit | repo=%s | max_chars=%s", name, max_chars)
-                readme = cached
+                if cached:
+                    readmes[str(name)] = cached
             else:
                 logger.debug("GitHub README cache miss | repo=%s | max_chars=%s", name, max_chars)
-                readme = await _fetch_repository_readme(
+                cache_misses.append((str(name), cache_key))
+
+        async def fetch_readme(name: str) -> str:
+            async with self._readme_fetch_semaphore:
+                return await _fetch_repository_readme(
                     client=client,
                     api_base_url=api_base_url,
                     owner=owner,
@@ -199,9 +209,12 @@ class ConfiguredPortfolioRetrievalService:
                     headers=headers,
                     max_chars=max_chars,
                 )
-                self._github_readme_cache[cache_key] = self._new_cache_entry(readme)
+
+        fetched = await asyncio.gather(*(fetch_readme(name) for name, _ in cache_misses))
+        for (name, cache_key), readme in zip(cache_misses, fetched):
+            self._github_readme_cache[cache_key] = self._new_cache_entry(readme)
             if readme:
-                readmes[str(name)] = readme
+                readmes[name] = readme
         return readmes
 
     def _get_cache_value(self, entry: CacheEntry | None) -> object | None:
@@ -244,14 +257,15 @@ class ConfiguredPortfolioRetrievalService:
             )
             query_embedding = await embedding_client.aembed_query(query)
             store = ResumeVectorStore(self._settings.neon_database_url_string)
-            chunks = store.search(
+            chunks = await asyncio.to_thread(
+                store.search,
                 namespace=self._settings.resume_vector_namespace,
                 query_embedding=query_embedding,
                 limit=self._settings.resume_vector_top_k,
             )
         except Exception as exc:
-            logger.warning("resume vector retrieval failed | reason=%s", exc)
-            return RetrievalResult(source=RetrievalSource.RESUME, error=f"Resume vector retrieval failed: {exc}")
+            logger.warning("resume vector retrieval failed | reason=%s", exc, exc_info=True)
+            return RetrievalResult(source=RetrievalSource.RESUME, error="Resume vector retrieval failed.")
 
         logger.info(
             "resume vector retrieval complete | namespace=%s | chunks=%s",
@@ -273,14 +287,16 @@ def _read_text_source(source: RetrievalSource, configured_path: str | None, env_
 
     path = Path(configured_path)
     if not path.exists() or not path.is_file():
-        return RetrievalResult(source=source, error=f"{env_name} points to a missing file: {configured_path}")
+        logger.warning("%s points to a missing file | path=%s", env_name, configured_path)
+        return RetrievalResult(source=source, error=f"{env_name} points to a missing file.")
 
     try:
         if path.suffix.lower() == ".pdf":
             return RetrievalResult(source=source, content=_extract_pdf_text(path))
         return RetrievalResult(source=source, content=_normalize_text_content(path.read_text(encoding="utf-8")))
     except OSError as exc:
-        return RetrievalResult(source=source, error=f"Could not read {source.value} file: {exc}")
+        logger.warning("%s file read failed | path=%s | reason=%s", source.value, configured_path, exc, exc_info=True)
+        return RetrievalResult(source=source, error=f"Could not read {source.value} file.")
 
 
 def _load_default_resume_source() -> RetrievalResult:
@@ -332,32 +348,6 @@ def _format_resume_chunks(chunks: list[RetrievedChunk]) -> str:
     return "\n".join(sections)
 
 
-async def _fetch_repository_readmes(
-    client: httpx.AsyncClient,
-    api_base_url: str,
-    owner: str,
-    headers: dict[str, str],
-    repos: list[dict],
-    max_chars: int,
-) -> dict[str, str]:
-    readmes: dict[str, str] = {}
-    for repo in repos:
-        name = repo.get("name")
-        if not name:
-            continue
-        readme = await _fetch_repository_readme(
-            client=client,
-            api_base_url=api_base_url,
-            owner=owner,
-            repo=name,
-            headers=headers,
-            max_chars=max_chars,
-        )
-        if readme:
-            readmes[name] = readme
-    return readmes
-
-
 async def _fetch_repository_readme(
     client: httpx.AsyncClient,
     api_base_url: str,
@@ -376,7 +366,13 @@ async def _fetch_repository_readme(
         logger.debug("GitHub README retrieval skipped | repo=%s | reason=%s", repo, exc)
         return ""
 
-    payload = response.json()
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        logger.debug("GitHub README retrieval skipped | repo=%s | reason=%s", repo, exc)
+        return ""
+    if not isinstance(payload, dict):
+        return ""
     encoded_content = payload.get("content")
     if not isinstance(encoded_content, str):
         return ""

@@ -2,7 +2,7 @@ import logging
 import re
 
 from app.config import Settings
-from app.graph.constants import NodeName, RetrievalSource
+from app.graph.constants import NodeName, RetrievalSource, RouteName
 from app.graph.observability import log_node, skipped_update
 from app.graph.state import PortfolioState
 from app.services.assistant import AssistantService
@@ -47,7 +47,7 @@ class PortfolioGraphNodes:
             query=state["rewritten_query"],
             history=state.get("messages", []),
         )
-        return {
+        update = {
             "rewritten_query": rewritten_query,
             "node_trace": [NodeName.RESOLVE_CONTEXT],
             **_llm_usage_update(
@@ -56,17 +56,18 @@ class PortfolioGraphNodes:
                 "context_resolution",
             ),
         }
+        if rewritten_query != state["rewritten_query"]:
+            policy_reason = _detect_policy_violation(rewritten_query)
+            if policy_reason:
+                update.update(_policy_violation_update(policy_reason))
+        return update
 
     @log_node(NodeName.POLICY_GUARD)
     async def policy_guard(self, state: PortfolioState) -> dict:
-        policy_reason = _detect_policy_violation(state["rewritten_query"])
+        policy_reason = _detect_policy_violation(state["user_query"])
         if policy_reason:
             return {
-                "policy_violation": True,
-                "policy_reason": policy_reason,
-                "is_relevant": False,
-                "intent": "policy_violation",
-                "route": "off_topic",
+                **_policy_violation_update(policy_reason),
                 "node_trace": [NodeName.POLICY_GUARD],
             }
 
@@ -77,21 +78,25 @@ class PortfolioGraphNodes:
 
     @log_node(NodeName.CLASSIFY_RELEVANCE)
     async def classify_relevance(self, state: PortfolioState) -> dict:
-        decision = await self._assistant_service.classify_relevance(
+        decision = await self._assistant_service.classify_and_plan(
             query=state["rewritten_query"],
             assistant_subject=state.get("assistant_subject", "the portfolio owner"),
         )
-        return {
-            "is_relevant": decision.is_relevant,
+        update = {
+            "is_relevant": decision.route == RouteName.PORTFOLIO_QUERY,
             "intent": decision.intent,
-            "route": decision.route,
+            "route": decision.route.value,
             "node_trace": [NodeName.CLASSIFY_RELEVANCE],
             **_llm_usage_update(
                 self._assistant_service,
                 NodeName.CLASSIFY_RELEVANCE,
-                "relevance_classification",
+                "routing_decision",
             ),
         }
+        if decision.route == RouteName.PORTFOLIO_QUERY:
+            update["planned_retrieval_sources"] = [source.value for source in decision.sources]
+            update["planned_retrieval_reason"] = decision.reason
+        return update
 
     @log_node(NodeName.CHECK_AMBIGUITY)
     async def check_ambiguity(self, state: PortfolioState) -> dict:
@@ -118,20 +123,10 @@ class PortfolioGraphNodes:
 
     @log_node(NodeName.PLAN_RETRIEVAL)
     async def plan_retrieval(self, state: PortfolioState) -> dict:
-        plan = await self._assistant_service.plan_retrieval(
-            query=state["rewritten_query"],
-            assistant_subject=state.get("assistant_subject", "the portfolio owner"),
-            intent=state.get("intent"),
-        )
         return {
-            "retrieval_sources": [source.value for source in plan.sources],
-            "retrieval_reason": plan.reason,
+            "retrieval_sources": state.get("planned_retrieval_sources", []),
+            "retrieval_reason": state.get("planned_retrieval_reason", ""),
             "node_trace": [NodeName.PLAN_RETRIEVAL],
-            **_llm_usage_update(
-                self._assistant_service,
-                NodeName.PLAN_RETRIEVAL,
-                "retrieval_planning",
-            ),
         }
 
     @log_node(NodeName.RETRIEVE_PROJECTS)
@@ -167,11 +162,9 @@ class PortfolioGraphNodes:
         for label, key in _ordered_context_sections(state):
             content = state.get(key, "").strip()
             if content:
-                sections.append(f"[{label}]\n{content}")
+                sections.append((label, content))
 
-        merged_context = "\n\n".join(sections).strip()
-        if len(merged_context) > self._settings.merged_context_max_chars:
-            merged_context = merged_context[: self._settings.merged_context_max_chars].rstrip()
+        merged_context = _merge_context_sections(sections, self._settings.merged_context_max_chars)
 
         return {
             "merged_context": merged_context,
@@ -293,6 +286,30 @@ def _ordered_context_sections(state: PortfolioState) -> list[tuple[str, str]]:
             ordered_sections.append(section)
     ordered_sections.append(("inline_context", "portfolio_context"))
     return ordered_sections
+
+
+def _merge_context_sections(sections: list[tuple[str, str]], max_chars: int) -> str:
+    merged = "\n\n".join(f"[{label}]\n{content}" for label, content in sections)
+    if len(merged) <= max_chars or len(sections) < 2:
+        return merged[:max_chars].rstrip()
+
+    overhead = sum(len(f"[{label}]\n") for label, _ in sections) + 2 * (len(sections) - 1)
+    content_budget = max_chars - overhead
+    if content_budget < len(sections):
+        return merged[:max_chars].rstrip()
+
+    reserved = content_budget // len(sections)
+    allocations = [min(len(content), reserved) for _, content in sections]
+    remaining = content_budget - sum(allocations)
+    for index, (_, content) in enumerate(sections):
+        extra = min(len(content) - allocations[index], remaining)
+        allocations[index] += extra
+        remaining -= extra
+
+    return "\n\n".join(
+        f"[{label}]\n{content[:allocation].rstrip()}"
+        for (label, content), allocation in zip(sections, allocations, strict=True)
+    ).rstrip()
 
 
 def _llm_usage_update(assistant_service: AssistantService, node_name: NodeName, operation: str) -> dict:
@@ -418,6 +435,16 @@ def _detect_policy_violation(query: str) -> str | None:
         if pattern.search(query):
             return reason
     return None
+
+
+def _policy_violation_update(reason: str) -> dict:
+    return {
+        "policy_violation": True,
+        "policy_reason": reason,
+        "is_relevant": False,
+        "intent": "policy_violation",
+        "route": "off_topic",
+    }
 
 
 AMBIGUOUS_REFERENCE_PATTERNS = (

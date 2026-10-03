@@ -1,13 +1,15 @@
 import asyncio
 
+import pytest
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from app import main as app_main
 from app.api import prompt as prompt_api
 from app.config import Settings, SettingsError, get_settings
 from app.errors import UpstreamServiceError
 from app.main import create_app
-from app.schemas import PromptResponse
+from app.schemas import PromptRequest, PromptResponse
 
 
 def _build_test_settings(**overrides) -> Settings:
@@ -25,6 +27,103 @@ def _assert_error(response, *, status: int, code: str, message: str | None = Non
     assert body["error"]["code"] == code
     if message is not None:
         assert body["error"]["message"] == message
+
+
+@pytest.mark.parametrize("endpoint", ["/prompt", "/prompt/stream"])
+@pytest.mark.parametrize(
+    ("case", "expected_field"),
+    [
+        ("prompt", "prompt"),
+        ("history_turns", "history"),
+        ("history_text", "history"),
+        ("assistant_subject", "assistant_subject"),
+        ("ignored_history", "history"),
+    ],
+)
+def test_api_rejects_oversized_model_inputs_before_runner(monkeypatch, endpoint, case, expected_field):
+    async def unexpected_run_prompt(request, settings, *, request_id=None):
+        raise AssertionError("oversized input must not reach the prompt runner")
+
+    async def unexpected_run_prompt_stream(request, settings, *, request_id=None):
+        raise AssertionError("oversized input must not reach the prompt runner")
+        yield
+
+    monkeypatch.setattr(prompt_api, "run_prompt", unexpected_run_prompt)
+    monkeypatch.setattr(prompt_api, "run_prompt_stream", unexpected_run_prompt_stream)
+    monkeypatch.setattr(app_main, "require_settings", lambda: _build_test_settings(RATE_LIMIT_ENABLED=False))
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = lambda: _build_test_settings(RATE_LIMIT_ENABLED=False)
+    payload = {"prompt": "Tell me more"}
+    if case == "prompt":
+        payload["prompt"] = "x" * 4001
+    elif case == "history_turns":
+        payload["history"] = [{"user": "u", "assistant": "a"} for _ in range(11)]
+    elif case == "history_text":
+        payload["history"] = [{"user": "u", "assistant": "a" * 24000}]
+    elif case == "assistant_subject":
+        payload["assistant_subject"] = "a" * 121
+    else:
+        payload["session_id"] = client.app.state.session_store.create_session()
+        payload["history"] = [{"user": "u", "assistant": "a"} for _ in range(11)]
+
+    response = client.post(endpoint, json=payload)
+
+    _assert_error(response, status=422, code="VALIDATION_ERROR")
+    assert any(detail["field"] == expected_field for detail in response.json()["error"]["details"])
+
+
+def test_shared_prompt_request_remains_unbounded_for_cli():
+    request = PromptRequest(
+        prompt="x" * 4001,
+        history=[{"user": "u", "assistant": "a"} for _ in range(11)],
+    )
+
+    assert len(request.prompt) == 4001
+    assert len(request.history) == 11
+
+
+@pytest.mark.parametrize("endpoint", ["/prompt", "/prompt/stream"])
+def test_api_accepts_inputs_at_size_limits(monkeypatch, endpoint):
+    observed = []
+
+    def completed_response(request):
+        observed.append(request)
+        return PromptResponse(
+            answer="ok",
+            session_id=request.session_id,
+            history=[],
+            is_relevant=False,
+            intent="off_topic",
+            route="off_topic",
+            rewritten_query=request.prompt,
+            node_trace=["save_memory"],
+        )
+
+    async def fake_run_prompt(request, settings, *, request_id=None):
+        return completed_response(request)
+
+    async def fake_run_prompt_stream(request, settings, *, request_id=None):
+        yield {"type": "answer_completed", "data": completed_response(request).model_dump()}
+
+    monkeypatch.setattr(prompt_api, "run_prompt", fake_run_prompt)
+    monkeypatch.setattr(prompt_api, "run_prompt_stream", fake_run_prompt_stream)
+    monkeypatch.setattr(app_main, "require_settings", lambda: _build_test_settings(RATE_LIMIT_ENABLED=False))
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = lambda: _build_test_settings(RATE_LIMIT_ENABLED=False)
+    history = [{"user": "u", "assistant": "a" * 2399} for _ in range(10)]
+
+    response = client.post(
+        endpoint,
+        json={"prompt": "x" * 4000, "history": history, "assistant_subject": "a" * 120},
+    )
+
+    assert response.status_code == 200
+    assert len(observed) == 1
+    assert len(observed[0].prompt) == 4000
+    assert len(observed[0].history) == 10
+    assert sum(len(turn.user) + len(turn.assistant) for turn in observed[0].history) == 24000
+    if endpoint.endswith("/stream"):
+        assert "event: answer_completed" in response.text
 
 
 def test_prompt_route_creates_session_and_reuses_history(monkeypatch):
@@ -78,6 +177,140 @@ def test_prompt_route_creates_session_and_reuses_history(monkeypatch):
             "assistant": "answer: What projects has Alex built?",
         }
     ]
+
+
+def test_prompt_route_uses_stored_history_for_existing_session(monkeypatch):
+    observed_history = []
+
+    async def fake_run_prompt(request, settings, *, request_id=None):
+        observed_history.extend(request.history)
+        return PromptResponse(
+            answer="answer",
+            session_id=request.session_id,
+            history=[*request.history, {"user": request.prompt, "assistant": "answer"}],
+            is_relevant=True,
+            intent="projects",
+            route="portfolio_query",
+            retrieval_sources=["projects"],
+            retrieval_reason="Project questions need project data.",
+            rewritten_query=request.prompt,
+            node_trace=["ingest_user_message", "save_memory"],
+        )
+
+    monkeypatch.setattr(prompt_api, "run_prompt", fake_run_prompt)
+    monkeypatch.setattr(app_main, "require_settings", _test_settings)
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = _test_settings
+    prior_turn = {"user": "Tell me about MatchCast", "assistant": "MatchCast is a portfolio project."}
+    conflicting_turn = {"user": "Unrelated question", "assistant": "Unrelated answer."}
+    session_id = client.app.state.session_store.create_session()
+    client.app.state.session_store.set_history(session_id, [prior_turn])
+
+    response = client.post(
+        "/prompt",
+        json={"prompt": "Tell me more about it", "session_id": session_id, "history": [prior_turn, conflicting_turn]},
+    )
+
+    assert response.status_code == 200
+    assert [turn.model_dump() for turn in observed_history] == [prior_turn]
+    assert response.json()["history"] == [prior_turn, {"user": "Tell me more about it", "assistant": "answer"}]
+    assert client.app.state.session_store.get_history(session_id) == response.json()["history"]
+
+
+def test_prompt_route_accepts_history_for_new_session(monkeypatch):
+    observed_history = []
+
+    async def fake_run_prompt(request, settings, *, request_id=None):
+        observed_history.extend(request.history)
+        return PromptResponse(
+            answer="answer",
+            session_id=request.session_id,
+            history=[*request.history, {"user": request.prompt, "assistant": "answer"}],
+            is_relevant=True,
+            intent="projects",
+            route="portfolio_query",
+            retrieval_sources=["projects"],
+            retrieval_reason="Project questions need project data.",
+            rewritten_query=request.prompt,
+            node_trace=["ingest_user_message", "save_memory"],
+        )
+
+    monkeypatch.setattr(prompt_api, "run_prompt", fake_run_prompt)
+    monkeypatch.setattr(app_main, "require_settings", _test_settings)
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = _test_settings
+    prior_turn = {"user": "Tell me about MatchCast", "assistant": "MatchCast is a portfolio project."}
+
+    response = client.post("/prompt", json={"prompt": "Tell me more about it", "history": [prior_turn]})
+
+    assert response.status_code == 200
+    assert [turn.model_dump() for turn in observed_history] == [prior_turn]
+    assert response.json()["history"] == [prior_turn, {"user": "Tell me more about it", "assistant": "answer"}]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_concurrent_session_turns_are_both_saved(monkeypatch, stream):
+    both_started = asyncio.Event()
+    started = 0
+
+    async def wait_for_other_request():
+        nonlocal started
+        started += 1
+        if started == 2:
+            both_started.set()
+        await both_started.wait()
+
+    def completed_response(request):
+        return PromptResponse(
+            answer=f"answer: {request.prompt}",
+            session_id=request.session_id,
+            history=[*request.history, {"user": request.prompt, "assistant": f"answer: {request.prompt}"}],
+            is_relevant=True,
+            intent="projects",
+            route="portfolio_query",
+            retrieval_sources=["projects"],
+            retrieval_reason="Project questions need project data.",
+            rewritten_query=request.prompt,
+            node_trace=["ingest_user_message", "save_memory"],
+        )
+
+    async def fake_run_prompt(request, settings, *, request_id=None):
+        await wait_for_other_request()
+        return completed_response(request)
+
+    async def fake_run_prompt_stream(request, settings, *, request_id=None):
+        await wait_for_other_request()
+        yield {"type": "answer_completed", "data": completed_response(request).model_dump()}
+
+    monkeypatch.setattr(prompt_api, "run_prompt", fake_run_prompt)
+    monkeypatch.setattr(prompt_api, "run_prompt_stream", fake_run_prompt_stream)
+    monkeypatch.setattr(app_main, "require_settings", _test_settings)
+    app = create_app()
+    app.dependency_overrides[get_settings] = _test_settings
+    session_id = app.state.session_store.create_session()
+    prior_turn = {"user": "Earlier question", "assistant": "Earlier answer"}
+    app.state.session_store.set_history(session_id, [prior_turn])
+    prompts = ["What projects has Alex built?", "What skills does Alex use?"]
+    endpoint = "/prompt/stream" if stream else "/prompt"
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        responses = await asyncio.wait_for(
+            asyncio.gather(
+                *(client.post(endpoint, json={"prompt": prompt, "session_id": session_id}) for prompt in prompts)
+            ),
+            timeout=5,
+        )
+
+    assert [response.status_code for response in responses] == [200, 200]
+    if stream:
+        for response in responses:
+            assert "event: answer_completed" in response.text
+            assert "event: error" not in response.text
+    history = app.state.session_store.get_history(session_id)
+    assert history[0] == prior_turn
+    assert len(history) == 3
+    assert {turn["user"] for turn in history[1:]} == set(prompts)
+    assert all(turn["assistant"] == f"answer: {turn['user']}" for turn in history[1:])
 
 
 def test_prompt_route_returns_404_for_unknown_session(monkeypatch):
@@ -285,6 +518,50 @@ def test_prompt_stream_route_emits_sse_events(monkeypatch):
     assert '"delta": "Second streamed sentence."' in body
 
 
+def test_prompt_stream_uses_stored_history_for_existing_session(monkeypatch):
+    observed_history = []
+
+    async def fake_run_prompt_stream(request, settings, *, request_id=None):
+        observed_history.extend(request.history)
+        yield {
+            "type": "answer_completed",
+            "data": PromptResponse(
+                answer="answer",
+                session_id=request.session_id,
+                history=[*request.history, {"user": request.prompt, "assistant": "answer"}],
+                is_relevant=True,
+                intent="projects",
+                route="portfolio_query",
+                retrieval_sources=["projects"],
+                retrieval_reason="Project questions need project data.",
+                rewritten_query=request.prompt,
+                node_trace=["ingest_user_message", "save_memory"],
+            ).model_dump(),
+        }
+
+    monkeypatch.setattr(prompt_api, "run_prompt_stream", fake_run_prompt_stream)
+    monkeypatch.setattr(app_main, "require_settings", _test_settings)
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = _test_settings
+    prior_turn = {"user": "Tell me about MatchCast", "assistant": "MatchCast is a portfolio project."}
+    session_id = client.app.state.session_store.create_session()
+    client.app.state.session_store.set_history(session_id, [prior_turn])
+
+    response = client.post(
+        "/prompt/stream",
+        json={"prompt": "Tell me more about it", "session_id": session_id, "history": [prior_turn]},
+    )
+
+    assert response.status_code == 200
+    assert [turn.model_dump() for turn in observed_history] == [prior_turn]
+    assert '"session_id": "' + session_id + '"' in response.text
+    assert response.text.count('"user": "Tell me about MatchCast"') == 1
+    assert client.app.state.session_store.get_history(session_id) == [
+        prior_turn,
+        {"user": "Tell me more about it", "assistant": "answer"},
+    ]
+
+
 def test_prompt_stream_route_rejects_context_override_fields(monkeypatch):
     async def fake_run_prompt_stream(request, settings, *, request_id=None):
         raise AssertionError("run_prompt_stream should not be called")
@@ -475,6 +752,26 @@ def test_prompt_stream_preserves_partial_answer_on_upstream_failure(monkeypatch)
     assert "event: error" in body
     assert '"detail": "AI service failed during answer streaming."' in body
     assert '"partial_answer": "First partial sentence. "' in body
+
+
+def test_prompt_stream_failure_does_not_save_partial_turn(monkeypatch):
+    async def fake_run_prompt_stream(request, settings, *, request_id=None):
+        yield {"type": "answer_chunk", "data": "Partial answer. "}
+        raise UpstreamServiceError("AI service failed during answer streaming.")
+
+    monkeypatch.setattr(prompt_api, "run_prompt_stream", fake_run_prompt_stream)
+    monkeypatch.setattr(app_main, "require_settings", _test_settings)
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = _test_settings
+    session_id = client.app.state.session_store.create_session()
+    prior_turn = {"user": "Earlier question", "assistant": "Earlier answer"}
+    client.app.state.session_store.set_history(session_id, [prior_turn])
+
+    response = client.post("/prompt/stream", json={"prompt": "What projects?", "session_id": session_id})
+
+    assert response.status_code == 200
+    assert "event: error" in response.text
+    assert client.app.state.session_store.get_history(session_id) == [prior_turn]
 
 
 def test_prompt_stream_rate_limit_returns_429(monkeypatch):
