@@ -1,8 +1,10 @@
+import asyncio
+import base64
+
 from app.config import Settings
 from app.graph.constants import RetrievalSource
 from app.services import retrieval as retrieval_module
 from app.services.retrieval import ConfiguredPortfolioRetrievalService
-import base64
 
 
 async def test_resume_retrieval_reads_configured_text_file(tmp_path, monkeypatch):
@@ -176,6 +178,84 @@ async def test_project_retrieval_uses_in_memory_github_cache(tmp_path, monkeypat
     assert fake_client.get_calls.count("readme:project-with-readme") == 1
     assert fake_client.get_calls.count("readme:project-with-readme-api") == 1
     assert fake_client.get_calls.count("readme:project-without-readme") == 1
+
+
+async def test_project_retrieval_bounds_readme_concurrency_and_preserves_order(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    class SlowGitHubClient:
+        def __init__(self):
+            self.active = 0
+            self.peak = 0
+            self.readme_calls = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        async def get(self, url, headers=None, params=None):
+            if url.endswith("/users/alex/repos"):
+                return FakeResponse([{"name": f"project-{number}", "fork": False} for number in range(1, 8)])
+
+            name = url.split("/")[-2]
+            self.readme_calls.append(name)
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+            try:
+                await asyncio.sleep(0.01 * (8 - int(name[-1])))
+            finally:
+                self.active -= 1
+            if name == "project-4":
+                raise retrieval_module.httpx.ReadTimeout("simulated README timeout")
+            encoded = base64.b64encode(f"README for {name}".encode()).decode()
+            return FakeResponse({"content": encoded})
+
+    fake_client = SlowGitHubClient()
+    monkeypatch.setattr(retrieval_module.httpx, "AsyncClient", lambda timeout: fake_client)
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            GITHUB_OWNER="alex",
+            GITHUB_PROJECTS_LIMIT=7,
+            GITHUB_CACHE_TTL_SECONDS=900,
+        )
+    )
+
+    first_result = await service.retrieve_projects()
+    second_result = await service.retrieve_projects()
+
+    assert first_result.error is None
+    assert first_result.content == second_result.content
+    assert fake_client.peak == 3
+    assert len(fake_client.readme_calls) == 7
+    for number in range(1, 8):
+        name = f"project-{number}"
+        section = first_result.content.split(f"- {name}\n", 1)[1].split("\n- project-", 1)[0]
+        assert (f"README for {name}" in section) == (number != 4)
+    assert [first_result.content.index(f"- project-{number}\n") for number in range(1, 8)] == sorted(
+        first_result.content.index(f"- project-{number}\n") for number in range(1, 8)
+    )
+
+    uncached_service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            GITHUB_OWNER="alex",
+            GITHUB_PROJECTS_LIMIT=7,
+            GITHUB_CACHE_TTL_SECONDS=0,
+        )
+    )
+    overlapping_results = await asyncio.gather(
+        uncached_service.retrieve_projects(), uncached_service.retrieve_projects()
+    )
+    assert overlapping_results[0].content == overlapping_results[1].content
+    assert fake_client.peak == 3
+    assert len(fake_client.readme_calls) == 21
 
 
 async def test_project_retrieval_cache_can_be_disabled_with_zero_ttl(tmp_path, monkeypatch):

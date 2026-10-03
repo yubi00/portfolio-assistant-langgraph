@@ -352,6 +352,7 @@ Project retrieval strategy:
 - If exact and normalized repo-name matching fail, deterministic fuzzy matching can still focus retrieval when one repository is a clear typo correction, such as `mathcast` -> `matchcast`.
 - Subjective project preference questions, such as "most proud of", "favorite", "flagship", or "most impressive", prioritize curated featured project metadata when available.
 - GitHub repository lists and README excerpts are cached in-process for a short TTL to reduce latency and avoid repeated GitHub calls for common portfolio questions.
+- Cold README cache misses are fetched with at most three concurrent GitHub requests; selected repository order still controls the formatted output.
 - Later: optionally pull GitHub pinned repositories through GraphQL and add scoring.
 
 Problem solved: "what projects has this person built?" should not treat forked repositories as owned work.
@@ -1071,3 +1072,20 @@ All limits are inclusive. Over-limit input returns the existing `422 VALIDATION_
 On a localhost Uvicorn `/prompt/stream` comparison with an instrumented runner, a normal request completed both before and after. Five over-limit cases (4,001 prompt characters, 11 history turns, 24,001 history characters, 121 subject characters, and 11 ignored turns with a session ID) each changed from HTTP 200 plus one runner call to HTTP 422 plus zero runner calls. Exact-boundary inputs passed on both JSON and SSE routes. A live `gpt-4.1-mini` follow-up with fixed retrieval still returned HTTP 200, `portfolio_query`, `resume` retrieval, two response history turns, and the same 179 context-resolution input tokens before and after. Its first-answer times were 7.25 seconds before and 3.98 seconds after, but one provider-dependent pair is not evidence of a latency improvement. All 101 tests pass.
 
 This protects model-facing public fields, not the total raw HTTP body: FastAPI still parses the JSON before field validation, and unknown or disallowed fields may carry large text. A transport-level body-byte cap would be a separate public-abuse hardening step if needed. Server-generated answers and stored turns are bounded by turn count, not by this incoming-history character limit. The current frontend maps `VALIDATION_ERROR` to a generic message; showing the field-specific limit is a separate frontend UX follow-up.
+
+### Bite 5: Concurrent Cold GitHub README Fetching (2026-10-03)
+
+Broad project retrieval previously fetched each selected repository's README sequentially after listing repositories. With 12 cold README requests, this network loop dominated project retrieval latency. The in-process cache already avoids those calls on a warm request; the optimization targets only cache misses.
+
+`_fetch_repository_readmes_cached` now runs misses through `asyncio.gather` with a semaphore of three shared by the retrieval service across overlapping requests. Cached excerpts are reused, successful and missing READMEs are cached under the existing `(repository name, excerpt limit)` key, and the final response is still formatted in selected-repository order. A named-project query still fetches at most one README. Existing 404/HTTP failure handling remains best-effort: one missing README does not remove its repository metadata or block the others. No new dependency or configuration knob was added.
+
+Two fresh-process localhost Uvicorn `/prompt/stream` comparisons used the same configured GitHub owner/token and live `gpt-4.1-mini` model. Every request selected the `portfolio_query` route, used `projects` retrieval, completed SSE, fetched 12 READMEs, and reported no retrieval errors. Each process began with an empty GitHub cache:
+
+| Run order | Before: peak / project retrieval | Bite 5: peak / project retrieval | First answer, before → after |
+| --- | --- | --- | --- |
+| Before then after | 1 / 8.23 s | 3 / 2.71 s | 12.56 s → 5.97 s |
+| After then before | 1 / 5.14 s | 3 / 2.63 s | 8.01 s → 6.12 s |
+
+The observed paired project-retrieval reductions were 5.53 and 2.51 seconds. End-to-end answer timing includes variable OpenAI latency and answer length, so these two pairs do not establish a guaranteed response-time gain. After moving the semaphore onto the shared retrieval service, a final cold live SSE run still completed with 12 README fetches, peak concurrency three, no retrieval errors, and 2.85 seconds in project retrieval. Focused tests verify the shared three-request ceiling even across overlapping top-level requests, selected output order, timeout isolation, warm-cache reuse, and zero-TTL behavior. The full suite passes with 102 tests.
+
+Trade-off: a cold request now sends up to three README requests at once instead of one. This is a small fixed ceiling to avoid a 12-request burst. The cache and concurrency limit remain process-local; simultaneous top-level requests may independently fetch the same uncached README, but their combined README request concurrency is still capped at three within that service instance.

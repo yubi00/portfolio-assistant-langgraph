@@ -97,6 +97,7 @@ Fill in `OPENAI_API_KEY`, `ASSISTANT_SUBJECT`, and optionally `GITHUB_OWNER` / `
 For public browser auth, set `REQUIRE_AUTH=true`, provide a 32+ byte `AUTH_SIGNING_SECRET`, configure `TURNSTILE_SECRET_KEY`, and set `AUTH_ALLOWED_ORIGINS` to the frontend origin list.
 
 Project README enrichment is controlled by `GITHUB_README_MAX_CHARS` for broad project lists and `GITHUB_TARGET_README_MAX_CHARS` for focused named-repository retrieval. Repositories without a README still appear with their normal metadata.
+Cold README cache misses are fetched with at most three concurrent GitHub requests; warm cache hits make no README request.
 
 Featured project metadata is loaded from `FEATURED_PROJECTS_PATH`, defaulting to `portfolio/featured_projects.json`. This optional curated layer gives subjective questions such as "most proud of", "favorite", or "flagship project" an explicit preference signal instead of relying only on GitHub recency.
 

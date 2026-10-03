@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import unicodedata
 from time import monotonic
@@ -21,6 +22,7 @@ from app.services.resume_vector_store import RetrievedChunk, ResumeVectorStore
 logger = logging.getLogger("app.services.retrieval")
 
 CacheEntry = tuple[float, object]
+README_FETCH_CONCURRENCY = 3
 
 
 class RetrievalResult(BaseModel):
@@ -58,6 +60,7 @@ class ConfiguredPortfolioRetrievalService:
         self._featured_projects = load_featured_projects(settings.featured_projects_path)
         self._github_repos_cache: CacheEntry | None = None
         self._github_readme_cache: dict[tuple[str, int], CacheEntry] = {}
+        self._readme_fetch_semaphore = asyncio.Semaphore(README_FETCH_CONCURRENCY)
 
     async def retrieve_projects(self, query: str | None = None) -> RetrievalResult:
         if not self._settings.github_owner:
@@ -180,6 +183,7 @@ class ConfiguredPortfolioRetrievalService:
         max_chars: int,
     ) -> dict[str, str]:
         readmes: dict[str, str] = {}
+        cache_misses: list[tuple[str, tuple[str, int]]] = []
         for repo in repos:
             name = repo.get("name")
             if not name:
@@ -188,10 +192,15 @@ class ConfiguredPortfolioRetrievalService:
             cached = self._get_cache_value(self._github_readme_cache.get(cache_key))
             if isinstance(cached, str):
                 logger.debug("GitHub README cache hit | repo=%s | max_chars=%s", name, max_chars)
-                readme = cached
+                if cached:
+                    readmes[str(name)] = cached
             else:
                 logger.debug("GitHub README cache miss | repo=%s | max_chars=%s", name, max_chars)
-                readme = await _fetch_repository_readme(
+                cache_misses.append((str(name), cache_key))
+
+        async def fetch_readme(name: str) -> str:
+            async with self._readme_fetch_semaphore:
+                return await _fetch_repository_readme(
                     client=client,
                     api_base_url=api_base_url,
                     owner=owner,
@@ -199,9 +208,12 @@ class ConfiguredPortfolioRetrievalService:
                     headers=headers,
                     max_chars=max_chars,
                 )
-                self._github_readme_cache[cache_key] = self._new_cache_entry(readme)
+
+        fetched = await asyncio.gather(*(fetch_readme(name) for name, _ in cache_misses))
+        for (name, cache_key), readme in zip(cache_misses, fetched):
+            self._github_readme_cache[cache_key] = self._new_cache_entry(readme)
             if readme:
-                readmes[str(name)] = readme
+                readmes[name] = readme
         return readmes
 
     def _get_cache_value(self, entry: CacheEntry | None) -> object | None:
