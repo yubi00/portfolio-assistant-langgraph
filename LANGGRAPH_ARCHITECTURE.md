@@ -1089,3 +1089,20 @@ Two fresh-process localhost Uvicorn `/prompt/stream` comparisons used the same c
 The observed paired project-retrieval reductions were 5.53 and 2.51 seconds. End-to-end answer timing includes variable OpenAI latency and answer length, so these two pairs do not establish a guaranteed response-time gain. After moving the semaphore onto the shared retrieval service, a final cold live SSE run still completed with 12 README fetches, peak concurrency three, no retrieval errors, and 2.85 seconds in project retrieval. Focused tests verify the shared three-request ceiling even across overlapping top-level requests, selected output order, timeout isolation, warm-cache reuse, and zero-TTL behavior. The full suite passes with 102 tests.
 
 Trade-off: a cold request now sends up to three README requests at once instead of one. This is a small fixed ceiling to avoid a 12-request burst. The cache and concurrency limit remain process-local; simultaneous top-level requests may independently fetch the same uncached README, but their combined README request concurrency is still capped at three within that service instance.
+
+### Bite 6: Keep Resume Vector Search Off the Event Loop (2026-10-03)
+
+Resume retrieval already awaited the OpenAI query embedding, but then called the synchronous `ResumeVectorStore.search` directly inside the async retrieval method. That call opens a psycopg connection and waits for a pgvector query, so one resume request could stall unrelated requests on the same event loop. The CLI/indexing methods remain synchronous.
+
+The runtime now hands only `store.search(...)` to `asyncio.to_thread`. The existing SQL, embedding request, result formatting, error handling, and local-file override are unchanged. A focused test first failed on the old path: a separate async task could not run during a simulated blocking search. It passes after the handoff. This chooses a small thread boundary over an async-driver migration or connection pool, neither of which is justified by this bite's evidence.
+
+A localhost Uvicorn `/prompt/stream` comparison used the configured live OpenAI model and Neon resume index. Both variants returned HTTP 200, `portfolio_query`, `resume`, one successful vector search, no retrieval errors, and completed SSE. To make contention comparable, each real search included the same controlled 400 ms wait; an independent client sent `GET /` while search was active:
+
+| Variant | Search including controlled wait | Concurrent health response |
+| --- | ---: | ---: |
+| Before: search on event loop | 791.5 ms | 805.1 ms |
+| Bite 6: search in worker thread | 768.4 ms | 14.2 ms |
+
+A further normal-path SSE run without injected wait completed with a 354.7 ms vector search, a 5.5 ms concurrent health response, and no retrieval error. All 103 tests pass. These measurements demonstrate improved responsiveness under contention, not a guaranteed reduction in the time for one isolated answer; model and database latency vary between runs.
+
+Trade-off: synchronous database work now occupies a worker thread instead of the event loop. A cancelled request cannot forcibly stop an in-flight psycopg operation, and heavy traffic could still exhaust the default thread pool or database connections. No new pool, timeout setting, or embedding-client lifecycle change is introduced here.

@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import time
 
 from app.config import Settings
 from app.graph.constants import RetrievalSource
@@ -73,6 +74,46 @@ async def test_resume_retrieval_uses_vector_store_when_configured(tmp_path, monk
     assert result.content.startswith("Resume vector chunks:")
     assert "Master of Information Technology" in result.content
     assert "resume vector retrieval complete" in caplog.text
+
+
+async def test_resume_vector_search_does_not_block_other_async_work(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(retrieval_module, "OpenAIEmbeddings", FakeEmbeddings)
+    search_active = False
+
+    class SlowResumeVectorStore:
+        def __init__(self, database_url):
+            pass
+
+        def search(self, *, namespace, query_embedding, limit):
+            nonlocal search_active
+            search_active = True
+            try:
+                time.sleep(0.15)
+            finally:
+                search_active = False
+            return []
+
+    monkeypatch.setattr(retrieval_module, "ResumeVectorStore", SlowResumeVectorStore)
+    service = ConfiguredPortfolioRetrievalService(
+        Settings(
+            _env_file=None,
+            OPENAI_API_KEY="test",
+            ASSISTANT_SUBJECT="Alex",
+            NEON_DATABASE_URL_STRING="postgresql://example",
+        )
+    )
+
+    async def observe_event_loop():
+        await asyncio.sleep(0.01)
+        return search_active
+
+    observed_during_search, result = await asyncio.gather(
+        observe_event_loop(), service.retrieve_resume(query="education")
+    )
+
+    assert observed_during_search
+    assert result.error == "No indexed resume chunks were found. Run portfolio-index-resume before serving resume queries."
 
 
 async def test_resume_path_override_keeps_local_file_retrieval_when_vectors_are_configured(tmp_path, monkeypatch):

@@ -256,7 +256,8 @@ class ConfiguredPortfolioRetrievalService:
             )
             query_embedding = await embedding_client.aembed_query(query)
             store = ResumeVectorStore(self._settings.neon_database_url_string)
-            chunks = store.search(
+            chunks = await asyncio.to_thread(
+                store.search,
                 namespace=self._settings.resume_vector_namespace,
                 query_embedding=query_embedding,
                 limit=self._settings.resume_vector_top_k,
