@@ -1,4 +1,3 @@
-from collections.abc import AsyncIterator
 from contextvars import ContextVar
 import re
 from typing import Any
@@ -106,20 +105,6 @@ class OpenAIAssistantClient:
         parsed = _extract_structured_response(response)
         self._record_token_usage("suggestion_generation", _extract_raw_response(response))
         return SuggestedPrompts(prompts=_normalize_suggestions(parsed.prompts))
-
-    async def stream_answer(self, query: str, assistant_subject: str, portfolio_context: str) -> AsyncIterator[str]:
-        try:
-            async for chunk in self._chat.astream(
-                build_answer_messages(
-                    query=query,
-                    assistant_subject=assistant_subject,
-                    portfolio_context=portfolio_context,
-                )
-            ):
-                if chunk.text:
-                    yield chunk.text
-        except Exception as exc:
-            raise UpstreamServiceError("AI service failed during answer streaming.") from exc
 
     def build_friendly_response(self, assistant_subject: str, intent: str | None = None) -> str:
         if intent == "policy_violation":

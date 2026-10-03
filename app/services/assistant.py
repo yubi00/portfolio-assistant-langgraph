@@ -1,5 +1,4 @@
 from typing import Protocol
-from collections.abc import AsyncIterator
 
 from pydantic import BaseModel, Field
 
@@ -39,9 +38,6 @@ class AssistantService(Protocol):
         answer: str,
         intent: str | None = None,
     ) -> SuggestedPrompts:
-        ...
-
-    async def stream_answer(self, query: str, assistant_subject: str, portfolio_context: str) -> AsyncIterator[str]:
         ...
 
     def build_friendly_response(self, assistant_subject: str, intent: str | None = None) -> str:

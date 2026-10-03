@@ -348,32 +348,6 @@ def _format_resume_chunks(chunks: list[RetrievedChunk]) -> str:
     return "\n".join(sections)
 
 
-async def _fetch_repository_readmes(
-    client: httpx.AsyncClient,
-    api_base_url: str,
-    owner: str,
-    headers: dict[str, str],
-    repos: list[dict],
-    max_chars: int,
-) -> dict[str, str]:
-    readmes: dict[str, str] = {}
-    for repo in repos:
-        name = repo.get("name")
-        if not name:
-            continue
-        readme = await _fetch_repository_readme(
-            client=client,
-            api_base_url=api_base_url,
-            owner=owner,
-            repo=name,
-            headers=headers,
-            max_chars=max_chars,
-        )
-        if readme:
-            readmes[name] = readme
-    return readmes
-
-
 async def _fetch_repository_readme(
     client: httpx.AsyncClient,
     api_base_url: str,
