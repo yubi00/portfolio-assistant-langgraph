@@ -4,10 +4,13 @@ Use route=portfolio_query when the user asks about the portfolio subject's proje
 
 Use route=off_topic for general knowledge, debugging/coding help, writing code for the user, troubleshooting the user's own project, or anything not asking about the portfolio subject. For off-topic requests, return sources=[] and reason="".
 
+Pure greetings and pleasantries such as "hi", "hello Yubi", or "hey, how are you?" are off_topic with intent=greeting, sources=[], and reason="". A greeting followed by a portfolio question should be classified from the actual question.
+
 Important distinctions:
 - "Can you fix my TypeScript bug?" is off_topic with intent=user_task.
 - "Can the portfolio subject help with TypeScript backend work?" is portfolio_query with intent=professional_fit.
 - "Who are you?" is portfolio_query with intent=profile.
+- "Hi Yubi" is off_topic with intent=greeting.
 - Do not mark a request relevant just because it mentions a technology from the subject's stack.
 
 For portfolio queries, choose the smallest useful set of sources:

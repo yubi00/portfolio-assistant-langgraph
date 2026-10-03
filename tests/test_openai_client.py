@@ -34,6 +34,14 @@ def test_openai_client_uses_configured_timeout_and_retries(monkeypatch):
     assert captured_kwargs["max_retries"] == 4
 
 
+def test_greeting_response_is_conversational():
+    client = OpenAIAssistantClient(_test_settings())
+
+    assert client.build_friendly_response("Yubi", "greeting") == (
+        "Hi! What would you like to know about Yubi's work or projects?"
+    )
+
+
 @pytest.mark.asyncio
 async def test_resolve_context_skips_standalone_query_even_with_history():
     async def fake_ainvoke(_messages):
