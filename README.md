@@ -44,10 +44,12 @@ What makes it different:
 - FastAPI application
 - `uv` project setup
 - LangGraph `StateGraph`
-- Nodes for ingest, context resolution, policy guard, relevance classification, ambiguity checking, retrieval planning, retrieval, context merge, answer generation, suggestion generation, clarification response, and friendly off-topic responses
+- Nodes for ingest, policy guard, context resolution, combined routing/source selection, ambiguity checking, retrieval planning, retrieval, context merge, answer generation, suggestion generation, clarification response, and friendly off-topic responses
 - Conditional routing for portfolio and off-topic prompts
 - Real OpenAI calls through `langchain-openai`
 - File-backed system prompts under `app/prompts/`
+
+For a portfolio question, the graph checks the original prompt against the policy guard, resolves context-dependent follow-ups, and makes one structured OpenAI call to choose both the route and retrieval sources. The `plan_retrieval` node records that decision after ambiguity checking; it does not make another model call. Selected sources are retrieved, their evidence is merged within `MERGED_CONTEXT_MAX_CHARS` (12,000 by default), and the answer is generated. Eligible answers then receive suggested follow-up prompts before the completed turn is saved. Off-topic or blocked requests take the friendly-response path without retrieval or answer generation.
 
 ## Resume Vector Indexing
 
@@ -121,13 +123,13 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/prompt `
   -Body '{"prompt":"What projects has this person built?"}'
 ```
 
-API session memory is now available through `session_id`. Omit it on the first request, then reuse the returned `session_id` on follow-up requests.
+API session memory is available through `session_id`. Omit it on the first request, then reuse the returned `session_id` on follow-up requests.
 
 You may provide `history` when starting a new session. Once you send a `session_id`, the API uses the history stored for that session and ignores any client-supplied `history`. This applies to both `/prompt` and `/prompt/stream` and prevents the same turns from being added twice.
 
 Both prompt endpoints limit public input to 4,000 prompt characters, 10 submitted history turns, 24,000 characters across submitted history text, and 120 characters for an optional `assistant_subject`. Exceeding a limit returns `422 VALIDATION_ERROR` before assistant processing. Submitted history is validated even when a `session_id` means it will be ignored; clients should omit it on follow-ups. These limits do not apply to the local CLI.
 
-Overlapping requests with the same `session_id` can run at the same time. Each answer sees the history available when its request starts; completed turns are saved in completion order so neither successful request overwrites the other. Sessions remain local to one server process.
+Overlapping requests with the same `session_id` can run at the same time. Each answer sees the history available when its request starts; completed turns are saved in completion order so neither successful request overwrites the other. Sessions remain local to one server process. By default, the store retains the latest 10 turns (`SESSION_HISTORY_MAX_TURNS`) and expires a session after 30 minutes without access (`SESSION_TTL_MINUTES`). Context-dependent rewriting considers up to the latest 4 turns (`CONTEXT_HISTORY_WINDOW`).
 
 The current memory model is a bounded app-level session store. LangGraph checkpointers were evaluated and intentionally deferred because this repo currently only needs short-term conversational memory, not durable thread persistence.
 
@@ -142,6 +144,10 @@ Invoke-WebRequest -Method Post http://127.0.0.1:8000/prompt/stream `
   -ContentType "application/json" `
   -Body '{"prompt":"What projects has this person built?"}'
 ```
+
+The SSE endpoint emits `session_started`, `progress`, `answer_chunk`, and `answer_completed` events, or an `error` event if processing fails after streaming begins. `answer_chunk` carries incremental generated text; `answer_completed` carries the final response metadata, including `session_id`, `history`, retrieval details, and `suggested_prompts`. Suggestions are generated after the answer for eligible portfolio queries, so they may arrive noticeably later than the last answer chunk. Clients that do not use suggestions can ignore them.
+
+Once SSE has started, an upstream failure is reported as an `error` event even though the HTTP status is already 200. Clients should treat `answer_completed` as successful completion and inspect `error` for a safe detail and any `partial_answer`. Validation, authorization, rate-limit, and unknown-session failures that occur before streaming starts use normal HTTP error responses. `Invoke-WebRequest` may buffer the response; use a streaming-capable client to observe chunks as they arrive.
 
 ## Vercel Deployment
 
@@ -254,7 +260,7 @@ The app now applies basic reliability controls to OpenAI-backed graph steps:
 - configurable request timeout with `OPENAI_TIMEOUT_SECONDS`
 - configurable client retries with `OPENAI_MAX_RETRIES`
 - non-streaming `/prompt` returns `503` for upstream AI-service failures
-- streaming `/prompt/stream` emits an `error` SSE event with the upstream failure detail
+- streaming `/prompt/stream` emits an `error` SSE event with a safe upstream failure message after streaming has started
 - when a stream fails after partial output, the `error` event includes `partial_answer`
 
 ## Public API Protection
@@ -359,14 +365,10 @@ TURNSTILE_BYPASS=false
 
 Resume PDF loading is still supported through explicit local-file overrides, but PDF/DOCX ingestion into the vector store is intentionally deferred.
 
-The streaming implementation emits these SSE events:
+## Tests
 
-- `session_started`
-- `progress`
-- `answer_chunk`
-- `answer_completed`
-- `error`
+```powershell
+uv run pytest -q
+```
 
-It reuses the existing prompt runner and session handling. The current version streams real `generate_answer` model output from the graph as it arrives, emits stable `progress` milestones for important graph steps, lightly buffers tiny token fragments into more natural text chunks, and then sends final response metadata when the run completes.
-
-The completed response payload includes `suggested_prompts`. These are generated as structured data after the main answer and can be ignored by clients that do not need follow-up suggestions. Suggestion generation uses the grounded answer rather than resending the full retrieved context, which keeps the extra LLM call cheaper while preserving answer quality.
+The test suite uses fakes for external services. To verify the full request path, run the API locally and call `/prompt/stream` with working OpenAI, GitHub, and Neon configuration; this makes live requests and may incur provider charges.
