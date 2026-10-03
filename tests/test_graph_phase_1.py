@@ -1,6 +1,7 @@
 from app.config import Settings
 from app.graph.builder import build_portfolio_graph
 from app.graph.constants import RetrievalSource, RouteName
+from app.graph.nodes import PortfolioGraphNodes
 from app.services.assistant import RoutingDecision, SuggestedPrompts
 from app.services.retrieval import RetrievalResult
 import logging
@@ -295,6 +296,52 @@ async def test_skill_query_can_plan_multiple_sources():
         "generate_suggestions",
         "save_memory",
     ]
+
+
+async def test_overflowing_project_context_keeps_resume_and_docs_evidence():
+    settings = Settings(
+        _env_file=None,
+        OPENAI_API_KEY="test",
+        ASSISTANT_SUBJECT="Alex",
+        MERGED_CONTEXT_MAX_CHARS=120,
+    )
+    nodes = PortfolioGraphNodes(FakeAssistantService(), FakeRetrievalService(), settings)
+
+    result = await nodes.merge_normalize_context(
+        {
+            "retrieval_sources": ["projects", "resume", "docs"],
+            "project_context": "P" * 300,
+            "resume_context": "RESUME_EVIDENCE",
+            "docs_context": "DOCS_EVIDENCE",
+        }
+    )
+
+    context = result["merged_context"]
+    assert len(context) == 120
+    assert context.index("[projects]") < context.index("[resume]") < context.index("[docs]")
+    assert "RESUME_EVIDENCE" in context
+    assert "DOCS_EVIDENCE" in context
+    assert context.count("P") == 61
+
+
+async def test_context_merge_keeps_under_cap_and_single_source_behavior():
+    settings = Settings(
+        _env_file=None,
+        OPENAI_API_KEY="test",
+        ASSISTANT_SUBJECT="Alex",
+        MERGED_CONTEXT_MAX_CHARS=35,
+    )
+    nodes = PortfolioGraphNodes(FakeAssistantService(), FakeRetrievalService(), settings)
+
+    under_cap = await nodes.merge_normalize_context(
+        {"retrieval_sources": ["projects", "resume"], "project_context": "Project", "resume_context": "Resume"}
+    )
+    single_source = await nodes.merge_normalize_context(
+        {"retrieval_sources": ["projects"], "project_context": "X" * 100}
+    )
+
+    assert under_cap["merged_context"] == "[projects]\nProject\n\n[resume]\nResume"
+    assert single_source["merged_context"] == ("[projects]\n" + "X" * 100)[:35]
 
 
 async def test_ambiguous_project_reference_returns_clarification():

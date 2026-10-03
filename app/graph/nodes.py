@@ -161,11 +161,9 @@ class PortfolioGraphNodes:
         for label, key in _ordered_context_sections(state):
             content = state.get(key, "").strip()
             if content:
-                sections.append(f"[{label}]\n{content}")
+                sections.append((label, content))
 
-        merged_context = "\n\n".join(sections).strip()
-        if len(merged_context) > self._settings.merged_context_max_chars:
-            merged_context = merged_context[: self._settings.merged_context_max_chars].rstrip()
+        merged_context = _merge_context_sections(sections, self._settings.merged_context_max_chars)
 
         return {
             "merged_context": merged_context,
@@ -287,6 +285,30 @@ def _ordered_context_sections(state: PortfolioState) -> list[tuple[str, str]]:
             ordered_sections.append(section)
     ordered_sections.append(("inline_context", "portfolio_context"))
     return ordered_sections
+
+
+def _merge_context_sections(sections: list[tuple[str, str]], max_chars: int) -> str:
+    merged = "\n\n".join(f"[{label}]\n{content}" for label, content in sections)
+    if len(merged) <= max_chars or len(sections) < 2:
+        return merged[:max_chars].rstrip()
+
+    overhead = sum(len(f"[{label}]\n") for label, _ in sections) + 2 * (len(sections) - 1)
+    content_budget = max_chars - overhead
+    if content_budget < len(sections):
+        return merged[:max_chars].rstrip()
+
+    reserved = content_budget // len(sections)
+    allocations = [min(len(content), reserved) for _, content in sections]
+    remaining = content_budget - sum(allocations)
+    for index, (_, content) in enumerate(sections):
+        extra = min(len(content) - allocations[index], remaining)
+        allocations[index] += extra
+        remaining -= extra
+
+    return "\n\n".join(
+        f"[{label}]\n{content[:allocation].rstrip()}"
+        for (label, content), allocation in zip(sections, allocations, strict=True)
+    ).rstrip()
 
 
 def _llm_usage_update(assistant_service: AssistantService, node_name: NodeName, operation: str) -> dict:
