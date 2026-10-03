@@ -17,7 +17,7 @@ from app.errors import (
     UpstreamServiceError,
     app_error_response,
 )
-from app.schemas import ConversationTurn, PromptRequest, PromptResponse
+from app.schemas import ApiPromptRequest, ConversationTurn, PromptRequest, PromptResponse
 from app.services.auth import verify_prompt_authorization
 from app.services.prompt_runner import run_prompt, run_prompt_stream
 from app.services.rate_limit import ActiveStreamRegistry, client_key_from_request, rate_limit_guard
@@ -34,7 +34,7 @@ STREAM_HEADERS = {
 
 @router.post("/prompt", response_model=PromptResponse)
 async def prompt(
-    payload: PromptRequest,
+    payload: ApiPromptRequest,
     request: Request,
     settings: Settings = Depends(get_settings),
 ) -> PromptResponse | JSONResponse:
@@ -87,7 +87,7 @@ async def prompt(
 
 @router.post("/prompt/stream", response_model=None)
 async def prompt_stream(
-    payload: PromptRequest,
+    payload: ApiPromptRequest,
     request: Request,
     settings: Settings = Depends(get_settings),
 ) -> StreamingResponse | JSONResponse:

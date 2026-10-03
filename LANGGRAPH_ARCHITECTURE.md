@@ -1052,3 +1052,22 @@ During LangGraph's `messages` streaming mode, LangChain implicitly streamed the 
 Both `with_structured_output` calls now bind `stream=False` to their underlying chat model. Passing `stream=False` to the outer structured runnable did not work because its parallel wrapper did not forward that invocation keyword to the model. `generate_answer` remains streamed and continues to provide incremental SSE answer chunks. This changes neither the number of model calls nor the public response contract.
 
 Verification: the warning was reproduced as an exception inside `langchain_openai.chat_models.base._astream` during a live graph stream. With the fix, live off-topic routing and portfolio routing/answer/suggestions completed with serializer warnings treated as errors. A localhost Uvicorn `/prompt/stream` follow-up returned HTTP 200, `portfolio_query`, `resume` retrieval, and completed SSE without the warning. All 88 tests pass, including assertions that only the two structured calls disable streaming.
+
+### Bite 4: Bound Public Model Inputs (2026-10-03)
+
+Previously, the shared `PromptRequest` required a non-empty prompt but had no maximum for the prompt, submitted history, or client-supplied `assistant_subject`. The session store's 10-turn cap is applied when storing history; it does not limit a new request before graph execution. A large prompt or history could therefore reach model-facing work, increasing cost and risking provider context-limit failures. The current browser client normally sends only `prompt` and `session_id`, so the new limits have headroom for its usual requests.
+
+FastAPI now validates public requests with `ApiPromptRequest`, a bounded subclass of the shared request model. The CLI continues to use `PromptRequest` unchanged:
+
+| Public API field | Limit | Reason |
+| --- | ---: | --- |
+| `prompt` | 4,000 characters | Bound the question sent to routing and answer generation |
+| Submitted `history` | 10 turns | Match the default stored-session turn cap |
+| Submitted history text | 24,000 characters total across `user` and `assistant` | Bound text from a newly seeded session, including one oversized turn |
+| Optional `assistant_subject` | 120 characters | Close another client-controlled path into model prompts |
+
+All limits are inclusive. Over-limit input returns the existing `422 VALIDATION_ERROR` shape with a field-level detail before either prompt runner starts; the API does not truncate user input. This also applies to over-limit `history` supplied with an existing `session_id`, even though valid client history is ignored for that session. Clients should omit history once they have a session ID. The limits are fixed API policy, separate from configurable server-owned history retention.
+
+On a localhost Uvicorn `/prompt/stream` comparison with an instrumented runner, a normal request completed both before and after. Five over-limit cases (4,001 prompt characters, 11 history turns, 24,001 history characters, 121 subject characters, and 11 ignored turns with a session ID) each changed from HTTP 200 plus one runner call to HTTP 422 plus zero runner calls. Exact-boundary inputs passed on both JSON and SSE routes. A live `gpt-4.1-mini` follow-up with fixed retrieval still returned HTTP 200, `portfolio_query`, `resume` retrieval, two response history turns, and the same 179 context-resolution input tokens before and after. Its first-answer times were 7.25 seconds before and 3.98 seconds after, but one provider-dependent pair is not evidence of a latency improvement. All 101 tests pass.
+
+This protects model-facing public fields, not the total raw HTTP body: FastAPI still parses the JSON before field validation, and unknown or disallowed fields may carry large text. A transport-level body-byte cap would be a separate public-abuse hardening step if needed. Server-generated answers and stored turns are bounded by turn count, not by this incoming-history character limit. The current frontend maps `VALIDATION_ERROR` to a generic message; showing the field-specific limit is a separate frontend UX follow-up.

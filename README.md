@@ -124,6 +124,8 @@ API session memory is now available through `session_id`. Omit it on the first r
 
 You may provide `history` when starting a new session. Once you send a `session_id`, the API uses the history stored for that session and ignores any client-supplied `history`. This applies to both `/prompt` and `/prompt/stream` and prevents the same turns from being added twice.
 
+Both prompt endpoints limit public input to 4,000 prompt characters, 10 submitted history turns, 24,000 characters across submitted history text, and 120 characters for an optional `assistant_subject`. Exceeding a limit returns `422 VALIDATION_ERROR` before assistant processing. Submitted history is validated even when a `session_id` means it will be ignored; clients should omit it on follow-ups. These limits do not apply to the local CLI.
+
 Overlapping requests with the same `session_id` can run at the same time. Each answer sees the history available when its request starts; completed turns are saved in completion order so neither successful request overwrites the other. Sessions remain local to one server process.
 
 The current memory model is a bounded app-level session store. LangGraph checkpointers were evaluated and intentionally deferred because this repo currently only needs short-term conversational memory, not durable thread persistence.

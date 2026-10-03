@@ -9,7 +9,7 @@ from app.api import prompt as prompt_api
 from app.config import Settings, SettingsError, get_settings
 from app.errors import UpstreamServiceError
 from app.main import create_app
-from app.schemas import PromptResponse
+from app.schemas import PromptRequest, PromptResponse
 
 
 def _build_test_settings(**overrides) -> Settings:
@@ -27,6 +27,103 @@ def _assert_error(response, *, status: int, code: str, message: str | None = Non
     assert body["error"]["code"] == code
     if message is not None:
         assert body["error"]["message"] == message
+
+
+@pytest.mark.parametrize("endpoint", ["/prompt", "/prompt/stream"])
+@pytest.mark.parametrize(
+    ("case", "expected_field"),
+    [
+        ("prompt", "prompt"),
+        ("history_turns", "history"),
+        ("history_text", "history"),
+        ("assistant_subject", "assistant_subject"),
+        ("ignored_history", "history"),
+    ],
+)
+def test_api_rejects_oversized_model_inputs_before_runner(monkeypatch, endpoint, case, expected_field):
+    async def unexpected_run_prompt(request, settings, *, request_id=None):
+        raise AssertionError("oversized input must not reach the prompt runner")
+
+    async def unexpected_run_prompt_stream(request, settings, *, request_id=None):
+        raise AssertionError("oversized input must not reach the prompt runner")
+        yield
+
+    monkeypatch.setattr(prompt_api, "run_prompt", unexpected_run_prompt)
+    monkeypatch.setattr(prompt_api, "run_prompt_stream", unexpected_run_prompt_stream)
+    monkeypatch.setattr(app_main, "require_settings", lambda: _build_test_settings(RATE_LIMIT_ENABLED=False))
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = lambda: _build_test_settings(RATE_LIMIT_ENABLED=False)
+    payload = {"prompt": "Tell me more"}
+    if case == "prompt":
+        payload["prompt"] = "x" * 4001
+    elif case == "history_turns":
+        payload["history"] = [{"user": "u", "assistant": "a"} for _ in range(11)]
+    elif case == "history_text":
+        payload["history"] = [{"user": "u", "assistant": "a" * 24000}]
+    elif case == "assistant_subject":
+        payload["assistant_subject"] = "a" * 121
+    else:
+        payload["session_id"] = client.app.state.session_store.create_session()
+        payload["history"] = [{"user": "u", "assistant": "a"} for _ in range(11)]
+
+    response = client.post(endpoint, json=payload)
+
+    _assert_error(response, status=422, code="VALIDATION_ERROR")
+    assert any(detail["field"] == expected_field for detail in response.json()["error"]["details"])
+
+
+def test_shared_prompt_request_remains_unbounded_for_cli():
+    request = PromptRequest(
+        prompt="x" * 4001,
+        history=[{"user": "u", "assistant": "a"} for _ in range(11)],
+    )
+
+    assert len(request.prompt) == 4001
+    assert len(request.history) == 11
+
+
+@pytest.mark.parametrize("endpoint", ["/prompt", "/prompt/stream"])
+def test_api_accepts_inputs_at_size_limits(monkeypatch, endpoint):
+    observed = []
+
+    def completed_response(request):
+        observed.append(request)
+        return PromptResponse(
+            answer="ok",
+            session_id=request.session_id,
+            history=[],
+            is_relevant=False,
+            intent="off_topic",
+            route="off_topic",
+            rewritten_query=request.prompt,
+            node_trace=["save_memory"],
+        )
+
+    async def fake_run_prompt(request, settings, *, request_id=None):
+        return completed_response(request)
+
+    async def fake_run_prompt_stream(request, settings, *, request_id=None):
+        yield {"type": "answer_completed", "data": completed_response(request).model_dump()}
+
+    monkeypatch.setattr(prompt_api, "run_prompt", fake_run_prompt)
+    monkeypatch.setattr(prompt_api, "run_prompt_stream", fake_run_prompt_stream)
+    monkeypatch.setattr(app_main, "require_settings", lambda: _build_test_settings(RATE_LIMIT_ENABLED=False))
+    client = TestClient(create_app())
+    client.app.dependency_overrides[get_settings] = lambda: _build_test_settings(RATE_LIMIT_ENABLED=False)
+    history = [{"user": "u", "assistant": "a" * 2399} for _ in range(10)]
+
+    response = client.post(
+        endpoint,
+        json={"prompt": "x" * 4000, "history": history, "assistant_subject": "a" * 120},
+    )
+
+    assert response.status_code == 200
+    assert len(observed) == 1
+    assert len(observed[0].prompt) == 4000
+    assert len(observed[0].history) == 10
+    assert sum(len(turn.user) + len(turn.assistant) for turn in observed[0].history) == 24000
+    if endpoint.endswith("/stream"):
+        assert "event: answer_completed" in response.text
 
 
 def test_prompt_route_creates_session_and_reuses_history(monkeypatch):

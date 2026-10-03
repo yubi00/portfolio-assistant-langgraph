@@ -1,4 +1,10 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+API_PROMPT_MAX_CHARS = 4000
+API_HISTORY_MAX_TURNS = 10
+API_HISTORY_MAX_CHARS = 24000
+API_ASSISTANT_SUBJECT_MAX_CHARS = 120
 
 
 class ConversationTurn(BaseModel):
@@ -14,6 +20,21 @@ class PromptRequest(BaseModel):
     portfolio_context: str | None = None
     resume_path: str | None = None
     docs_path: str | None = None
+
+
+class ApiPromptRequest(PromptRequest):
+    """Public API input bounds; CLI requests retain their existing contract."""
+
+    prompt: str = Field(min_length=1, max_length=API_PROMPT_MAX_CHARS)
+    history: list[ConversationTurn] = Field(default_factory=list, max_length=API_HISTORY_MAX_TURNS)
+    assistant_subject: str | None = Field(default=None, max_length=API_ASSISTANT_SUBJECT_MAX_CHARS)
+
+    @field_validator("history")
+    @classmethod
+    def limit_history_text(cls, history: list[ConversationTurn]) -> list[ConversationTurn]:
+        if sum(len(turn.user) + len(turn.assistant) for turn in history) > API_HISTORY_MAX_CHARS:
+            raise ValueError(f"History text must not exceed {API_HISTORY_MAX_CHARS} characters.")
+        return history
 
 
 class PromptResponse(BaseModel):
