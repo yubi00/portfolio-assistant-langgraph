@@ -11,12 +11,22 @@ logger = logging.getLogger("app.graph.routing")
 
 
 def route_after_policy_guard(state: PortfolioState) -> Literal["allowed", "blocked"]:
+    return _route_after_policy_check(state, "edge policy", NodeName.RESOLVE_CONTEXT)
+
+
+def route_after_context_resolution(state: PortfolioState) -> Literal["allowed", "blocked"]:
+    return _route_after_policy_check(state, "edge context", NodeName.CLASSIFY_RELEVANCE)
+
+
+def _route_after_policy_check(
+    state: PortfolioState, edge_label: str, allowed_destination: NodeName
+) -> Literal["allowed", "blocked"]:
     request_fragment = f" | request_id={state['request_id']}" if state.get("request_id") else ""
     session_fragment = f" | session_id={state['session_id']}" if state.get("session_id") else ""
     if state.get("policy_violation"):
         logger.info(
             "=> %-22s | destination=%s | reason=%s%s%s",
-            "edge policy",
+            edge_label,
             NodeName.FRIENDLY_RESPONSE.value,
             state.get("policy_reason"),
             request_fragment,
@@ -26,8 +36,8 @@ def route_after_policy_guard(state: PortfolioState) -> Literal["allowed", "block
 
     logger.info(
         "=> %-22s | destination=%s%s%s",
-        "edge policy",
-        NodeName.CLASSIFY_RELEVANCE.value,
+        edge_label,
+        allowed_destination.value,
         request_fragment,
         session_fragment,
     )

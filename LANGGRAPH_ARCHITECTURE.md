@@ -108,8 +108,8 @@ A single-prompt assistant would have to classify relevance, resolve follow-ups, 
 
 This harness splits those responsibilities into smaller units:
 
-- `resolve_context` turns follow-up questions into standalone questions when history is available.
-- `policy_guard` blocks obvious unsafe prompt patterns before classification or retrieval.
+- `policy_guard` blocks obvious unsafe user text before any model call.
+- `resolve_context` turns allowed follow-up questions into standalone questions when history is available, then checks changed rewrites for unsafe patterns.
 - `classify_relevance` makes one structured call for the route, intent, and proposed sources.
 - `check_ambiguity` asks for clarification when a follow-up reference cannot be safely resolved.
 - `plan_retrieval` publishes the proposed sources only after ambiguity checking passes.
@@ -252,11 +252,11 @@ Trade-off: in-memory limits are process-local. They are fine for a single-instan
 ```mermaid
 flowchart TD
     START([START]) --> Ingest[ingest_user_message]
-    Ingest --> Resolve[resolve_context]
-    Resolve --> Policy[policy_guard]
-
-    Policy -->|allowed| Classify[classify_relevance]
+    Ingest --> Policy[policy_guard]
+    Policy -->|allowed| Resolve[resolve_context]
     Policy -->|blocked| Friendly[friendly_response]
+    Resolve -->|allowed| Classify[classify_relevance]
+    Resolve -->|blocked rewrite| Friendly
 
     Classify -->|portfolio_query| Ambiguity[check_ambiguity]
     Classify -->|off_topic| Friendly[friendly_response]
@@ -278,7 +278,7 @@ flowchart TD
     Save --> END([END])
 ```
 
-`classify_relevance` calls the model once for `RoutingDecision` and holds the proposed sources in internal state. `plan_retrieval` copies that plan into response-visible state only for clear portfolio queries. It makes no model call. The existing node trace and SSE progress milestones remain in the same order.
+`classify_relevance` calls the model once for `RoutingDecision` and holds the proposed sources in internal state. `plan_retrieval` copies that plan into response-visible state only for clear portfolio queries. It makes no model call. The policy check now precedes context resolution in node traces and SSE progress; an initially blocked request skips context resolution entirely.
 
 ### Route Categories
 
@@ -291,7 +291,7 @@ This route split exists because a boolean `is_relevant` flag was too coarse. Por
 
 ### Policy Guard
 
-The graph runs `policy_guard` after context resolution and before relevance classification.
+The graph runs `policy_guard` on the original user text immediately after ingest and before any model call. If context resolution changes an allowed query, its output is checked with the same deterministic patterns before relevance classification. A blocked original query skips context resolution; a blocked rewrite stops before classification.
 
 It is intentionally deterministic rather than another LLM call. The guard blocks obvious unsafe prompt patterns before they can influence source planning or retrieval:
 
@@ -539,7 +539,7 @@ Trade-off: `TypedDict` does not validate data at runtime. We accept this for Pha
 
 ## Context Resolution
 
-`resolve_context` performs history-aware query contextualization. When prior conversation turns are present and the latest query looks context-dependent, it asks the LLM to rewrite the latest user message into a standalone portfolio question using a bounded recent-history window. If there is no history, or the latest query is already clearly standalone, it returns the query unchanged without spending an LLM call.
+`resolve_context` performs history-aware query contextualization after the raw-text policy check. When prior conversation turns are present and the latest query looks context-dependent, it asks the LLM to rewrite the latest user message into a standalone portfolio question using a bounded recent-history window. If there is no history, or the latest query is already clearly standalone, it returns the query unchanged without spending an LLM call. Changed rewrites receive the same policy check before routing continues.
 
 This follows the same design used by conversational RAG systems: rewrite the user question before classification and retrieval, instead of passing ambiguous follow-ups like "this project" or "the second one" directly into retrieval planning.
 
@@ -904,7 +904,7 @@ uv run portfolio-assistant "who are you" --show-trace
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> policy_guard -> classify_relevance -> check_ambiguity -> plan_retrieval -> retrieve_resume -> merge_normalize_context -> generate_answer -> generate_suggestions -> save_memory
+ingest_user_message -> policy_guard -> resolve_context -> classify_relevance -> check_ambiguity -> plan_retrieval -> retrieve_resume -> merge_normalize_context -> generate_answer -> generate_suggestions -> save_memory
 ```
 
 User-task redirect:
@@ -916,7 +916,7 @@ uv run portfolio-assistant "can you help me fix bug in one of my typescript proj
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> policy_guard -> classify_relevance -> friendly_response -> save_memory
+ingest_user_message -> policy_guard -> resolve_context -> classify_relevance -> friendly_response -> save_memory
 ```
 
 Portfolio-fit answer:
@@ -928,7 +928,7 @@ uv run portfolio-assistant "can Yubi help with TypeScript backend systems?" --su
 Expected trace:
 
 ```text
-ingest_user_message -> resolve_context -> policy_guard -> classify_relevance -> check_ambiguity -> plan_retrieval -> retrieve_projects -> retrieve_resume -> merge_normalize_context -> generate_answer -> generate_suggestions -> save_memory
+ingest_user_message -> policy_guard -> resolve_context -> classify_relevance -> check_ambiguity -> plan_retrieval -> retrieve_projects -> retrieve_resume -> merge_normalize_context -> generate_answer -> generate_suggestions -> save_memory
 ```
 
 ---
@@ -1116,3 +1116,13 @@ The merge still preserves planned source order and labels. If all content fits, 
 A deterministic test with an oversized project section confirms the capped answer context retains complete resume and docs facts, keeps order, and reuses their spare space for projects. A second test confirms under-cap and single-source outputs are unchanged. In a localhost `/prompt/stream` comparison using real GitHub, Neon, and OpenAI, both variants selected `portfolio_query` with `projects` and `resume`, returned HTTP 200, completed SSE, and reported no retrieval errors. Both retrieved 22,499 project characters and 2,603 resume characters. The old 12,000-character answer context had a projects section but no resume section; Bite 7's 12,000-character context had both. All 105 tests pass.
 
 Trade-off: when several large sources compete for the cap, each receives less space than a projects-first prefix would give the first source. This protects source coverage, not the relevance of each retained excerpt; changing per-source ranking or summarization remains separate work. The cap is still character-based, not a model-token budget, and no single-response latency improvement is claimed.
+
+### Bite 8: Check Original User Text Before Context Resolution (2026-10-03)
+
+Previously, the graph rewrote context-dependent prompts before running the deterministic policy guard. A blocked follow-up could therefore pay for an unnecessary OpenAI rewrite. Worse, if that rewrite omitted the blocked wording, the guard could allow the request to continue. A live pre-change localhost `/prompt/stream` request with seeded history reproduced this: a prompt-extraction follow-up made one context-resolution call and reached the `portfolio_query`/`projects` path, taking 7.79 seconds to complete.
+
+The graph now checks raw user text immediately after ingest. Blocked requests go straight to the deterministic friendly response with zero model calls. Allowed requests still run context resolution; if it changes the query, the same patterns check the rewrite before classification. The guard patterns and response wording are unchanged. The node trace and SSE progress order for allowed requests is now policy then context. An initially blocked request has no context-resolution node or progress event.
+
+The matched live post-change request returned HTTP 200, completed SSE, `off_topic`/`policy_violation`, and made zero context-resolution calls; it reached its first answer in 420 ms. This is both a safety correction and a saved provider call, so the changed route is intentional. A separate live legitimate follow-up still used one context-resolution call, rewrote “this project” to MatchCast, selected `portfolio_query`/`projects`, completed SSE, and had no retrieval errors. Focused tests cover blocked raw follow-ups, unsafe rewritten follow-ups, and ordinary follow-ups; all 107 tests pass.
+
+Trade-off: the deterministic raw-text guard can block a query that an LLM might have sanitized during rewriting. This is intentional for explicit unsafe requests, but the existing narrow-pattern false-positive risk remains. The rewrite recheck is performed only when the text changes, since unchanged text already passed the raw guard.

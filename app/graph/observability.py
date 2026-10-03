@@ -17,8 +17,8 @@ SKIPPED_REASON_KEY = "_log_skip_reason"
 
 NODE_LABELS = {
     NodeName.INGEST_USER_MESSAGE: "01 ingest",
-    NodeName.RESOLVE_CONTEXT: "02 context",
-    NodeName.POLICY_GUARD: "03 policy",
+    NodeName.POLICY_GUARD: "02 policy",
+    NodeName.RESOLVE_CONTEXT: "03 context",
     NodeName.CLASSIFY_RELEVANCE: "04 classify",
     NodeName.CHECK_AMBIGUITY: "05 ambiguity",
     NodeName.PLAN_RETRIEVAL: "06 plan",

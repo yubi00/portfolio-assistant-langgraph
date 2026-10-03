@@ -47,7 +47,7 @@ class PortfolioGraphNodes:
             query=state["rewritten_query"],
             history=state.get("messages", []),
         )
-        return {
+        update = {
             "rewritten_query": rewritten_query,
             "node_trace": [NodeName.RESOLVE_CONTEXT],
             **_llm_usage_update(
@@ -56,17 +56,18 @@ class PortfolioGraphNodes:
                 "context_resolution",
             ),
         }
+        if rewritten_query != state["rewritten_query"]:
+            policy_reason = _detect_policy_violation(rewritten_query)
+            if policy_reason:
+                update.update(_policy_violation_update(policy_reason))
+        return update
 
     @log_node(NodeName.POLICY_GUARD)
     async def policy_guard(self, state: PortfolioState) -> dict:
-        policy_reason = _detect_policy_violation(state["rewritten_query"])
+        policy_reason = _detect_policy_violation(state["user_query"])
         if policy_reason:
             return {
-                "policy_violation": True,
-                "policy_reason": policy_reason,
-                "is_relevant": False,
-                "intent": "policy_violation",
-                "route": "off_topic",
+                **_policy_violation_update(policy_reason),
                 "node_trace": [NodeName.POLICY_GUARD],
             }
 
@@ -434,6 +435,16 @@ def _detect_policy_violation(query: str) -> str | None:
         if pattern.search(query):
             return reason
     return None
+
+
+def _policy_violation_update(reason: str) -> dict:
+    return {
+        "policy_violation": True,
+        "policy_reason": reason,
+        "is_relevant": False,
+        "intent": "policy_violation",
+        "route": "off_topic",
+    }
 
 
 AMBIGUOUS_REFERENCE_PATTERNS = (
